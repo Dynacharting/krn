@@ -1,5 +1,5 @@
 // ENC-1293 — a Record-valued terminal is a BUILD-TIME error.
-// SPEC specs/2026-09-20-gma-join-correctness D7, §3.
+// SPEC specs/2026-09-20-krn-join-correctness D7, §3.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // THE DEFECT THIS CLOSES IS SILENT, AND IT SPANS TWO REPOS.

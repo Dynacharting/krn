@@ -1,6 +1,6 @@
 # `strand-throughput` — the instrument SPEC §5 Q2 obliges ENC-1005 to commit
 
-`specs/2026-09-20-gma-join-correctness/SPEC.md` §5 **Q2** rules that the
+`specs/2026-09-20-krn-join-correctness/SPEC.md` §5 **Q2** rules that the
 single-subscription heavy-compute regression from serializing one request DAG
 (**D3**) is acceptable, **on structural grounds that need no number**. In the
 same breath it strikes the two numbers that had been offered for it —

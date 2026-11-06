@@ -20,7 +20,7 @@ Pack::Pack(std::vector<std::string> names,
       "Pack: by:\"none\" requires a non-empty output streamKey — a join that "
       "ignores the symbol has no identity of its own and must be given the "
       "request's top-level 'streamKey' (SPEC "
-      "specs/2026-09-20-gma-join-correctness section 5 Q6)");
+      "specs/2026-09-20-krn-join-correctness section 5 Q6)");
 }
 
 void Pack::addPort(std::shared_ptr<INode> port) {

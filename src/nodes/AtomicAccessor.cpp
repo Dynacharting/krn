@@ -15,7 +15,7 @@ AtomicAccessor::AtomicAccessor(std::string symbol,
   , downstream_(std::move(downstream))
 {}
 
-// ENC-1335 / SPEC specs/2026-09-20-gma-join-correctness D3 (the pull half).
+// ENC-1335 / SPEC specs/2026-09-20-krn-join-correctness D3 (the pull half).
 //
 // THE SAMPLE IS TAKEN HERE, AND THE DELIVERY IS WHAT GETS DEFERRED. The caller
 // runs this on the clock's own thread — for a `Dispatcher`-driven chain that is

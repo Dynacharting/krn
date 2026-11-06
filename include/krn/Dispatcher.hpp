@@ -87,7 +87,7 @@ public:
   // ENC-1291. How many subscriptions are live RIGHT NOW, across every
   // (symbol, field).
   //
-  // This exists because SPEC specs/2026-09-20-gma-join-correctness section 1.5
+  // This exists because SPEC specs/2026-09-20-krn-join-correctness section 1.5
   // — a rejected build stranding every `Listener` it had already registered,
   // an unbounded client-reachable leak — had no direct observation point. The
   // only way to see it was to tick and watch for a value arriving at a
@@ -114,7 +114,7 @@ public:
   // or internally synchronised. The Dispatcher adds no further serialisation.
   //
   // ORDERED DELIVERY REQUIRES SINGLE-THREADED INGRESS PER SYMBOL (ENC-1005,
-  // SPEC specs/2026-09-20-gma-join-correctness D3). Read this as a PRECONDITION
+  // SPEC specs/2026-09-20-krn-join-correctness D3). Read this as a PRECONDITION
   // of D3, not as a property of it.
   //
   // The per-request strand serialises everything DOWNSTREAM of a Listener, and

@@ -1,6 +1,6 @@
 // tests/ws/SubscriptionStrandMintTest.cpp
 //
-// ENC-1338 — SPEC specs/2026-09-20-gma-join-correctness D3, D4.
+// ENC-1338 — SPEC specs/2026-09-20-krn-join-correctness D3, D4.
 // "One `asio::strand` minted per subscription in `ClientSession::handleSubscribe`."
 //
 // THE GAP THIS CLOSES. ENC-1005 implemented D3 and mutation-tested its own work

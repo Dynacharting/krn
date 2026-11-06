@@ -744,7 +744,7 @@ void ClientSession::handleSubscribe(const ::rapidjson::Document& doc) {
     deps.store      = exec_->store();
     deps.pool       = exec_->pool();
     deps.dispatcher = dispatcher_;
-    // ENC-1005 / SPEC specs/2026-09-20-gma-join-correctness D3, D4 — ONE
+    // ENC-1005 / SPEC specs/2026-09-20-krn-join-correctness D3, D4 — ONE
     // STRAND PER SUBSCRIPTION. This is the site D3 names, and the granularity
     // is the point: per SUBSCRIPTION, not per session and not per symbol.
     //

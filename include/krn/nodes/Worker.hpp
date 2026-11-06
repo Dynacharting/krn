@@ -15,7 +15,7 @@ namespace krn {
 //
 // READ THIS BEFORE REASONING ABOUT THE ACCUMULATOR. The two sentences that used
 // to stand here were both false, and SPEC
-// specs/2026-09-20-gma-join-correctness/SPEC.md section 1.3 lists them as one
+// specs/2026-09-20-krn-join-correctness/SPEC.md section 1.3 lists them as one
 // of the three places the engine's own documentation described semantics it
 // does not implement:
 //

@@ -292,7 +292,7 @@ void Dispatcher::ingest(const std::string& symbol,
   }
 }
 
-// ENC-1005 / SPEC specs/2026-09-20-gma-join-correctness D3, D4.
+// ENC-1005 / SPEC specs/2026-09-20-krn-join-correctness D3, D4.
 //
 // WHY THIS IS NOT ALWAYS A POOL POST. The per-DAG strand orders everything
 // DOWNSTREAM of a Listener. It cannot order what happens UPSTREAM of one — and

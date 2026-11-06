@@ -17,7 +17,7 @@ namespace krn {
 // Fan-in node: joins N DECLARED INPUTS into one tuple and forwards it
 // downstream.
 //
-// ENC-1291 / SPEC specs/2026-09-20-gma-join-correctness D2, D6, section 1.1
+// ENC-1291 / SPEC specs/2026-09-20-krn-join-correctness D2, D6, section 1.1
 // defect 2.
 //
 // WHAT CHANGED, AND WHY IT IS A FIX RATHER THAN A BREAK (D6). Until ENC-1291

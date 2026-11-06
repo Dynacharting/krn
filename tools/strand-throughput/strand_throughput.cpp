@@ -1,6 +1,6 @@
 // tools/strand-throughput/strand_throughput.cpp
 //
-// ENC-1005 — the instrument SPEC specs/2026-09-20-gma-join-correctness §5 Q2
+// ENC-1005 — the instrument SPEC specs/2026-09-20-krn-join-correctness §5 Q2
 // obliges this ticket to commit.
 //
 // WHY IT EXISTS. Q2 is ruled: the single-subscription heavy-compute regression

@@ -1,6 +1,6 @@
 // ENC-1291 — `arity` must equal `inputs.size()`, and the builder must say so.
 //
-// SPEC specs/2026-09-20-gma-join-correctness D2, section 1.1 defect 2.
+// SPEC specs/2026-09-20-krn-join-correctness D2, section 1.1 defect 2.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // THE DEFECT THIS FILE CLOSES
