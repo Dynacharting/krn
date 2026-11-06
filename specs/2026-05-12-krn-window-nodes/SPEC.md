@@ -1,14 +1,14 @@
-# SPEC: GMA windowing primitives — TumblingWindow + VectorReducer
+# SPEC: KRN windowing primitives — TumblingWindow + VectorReducer
 
 **Slug:** krn-window-nodes
 **Date:** 2026-05-12
 **Status:** Draft
 **Author:** ndrandal
-**Repo:** GMA_V3 (sole)
+**Repo:** krn (sole)
 
 ## Problem
 
-GMA has no primitive for "buffer ticks since the last clock boundary, reduce on the boundary." `BucketTime` aligns timer ticks to a wall-clock period; `Aggregate` joins N **parallel** inputs (`inputs:[node, node]`); `Worker` reduces a per-symbol accumulator that's never cleared on a clock boundary. Composing these does not produce per-period reduction over a sequential stream. Surfaced during the saved-chart slice's smoke prep (ENC-292): the audit's "BucketTime + Aggregate + Worker" recommendation was wrong about Aggregate's semantics, and `TreeBuilder` rejects `arity:0` configs anyway. Without a windowing primitive, true minute-bucketed OHLC and per-minute volume sums are inexpressible — the saved-chart slice currently shows running OHLC over `taHistoryMax`, not real per-minute candles.
+KRN has no primitive for "buffer ticks since the last clock boundary, reduce on the boundary." `BucketTime` aligns timer ticks to a wall-clock period; `Aggregate` joins N **parallel** inputs (`inputs:[node, node]`); `Worker` reduces a per-symbol accumulator that's never cleared on a clock boundary. Composing these does not produce per-period reduction over a sequential stream. Surfaced during the saved-chart slice's smoke prep (ENC-292): the audit's "BucketTime + Aggregate + Worker" recommendation was wrong about Aggregate's semantics, and `TreeBuilder` rejects `arity:0` configs anyway. Without a windowing primitive, true minute-bucketed OHLC and per-minute volume sums are inexpressible — the saved-chart slice currently shows running OHLC over `taHistoryMax`, not real per-minute candles.
 
 ## Proposed change
 
@@ -29,8 +29,8 @@ Per-minute OHLC = four such expressions (max for high, min for low, first for op
 
 ## Scope
 
-- New header + impl: `include/gma/nodes/TumblingWindow.hpp`, `src/nodes/TumblingWindow.cpp`. Lifecycle mirrors `BucketTime` (timer thread, `shared_from_this`, synchronous `shutdown()`, `start()` after construction).
-- New header + impl: `include/gma/nodes/VectorReducer.hpp`, `src/nodes/VectorReducer.cpp`. No timer; a thin pass-through transform.
+- New header + impl: `include/krn/nodes/TumblingWindow.hpp`, `src/nodes/TumblingWindow.cpp`. Lifecycle mirrors `BucketTime` (timer thread, `shared_from_this`, synchronous `shutdown()`, `start()` after construction).
+- New header + impl: `include/krn/nodes/VectorReducer.hpp`, `src/nodes/VectorReducer.cpp`. No timer; a thin pass-through transform.
 - No new registry. `VectorReducer` resolves its `fn` through the existing `FunctionMap::instance().getFunction(name)` at construction; if `first`/`last` aren't already registered, they get added to `registerBuiltinFunctions()` alongside the existing `sum`/`mean`/`max`/`min`/`spread` set.
 - `NodeTypeRegistry` registrations in `src/NodeRegistry.cpp` (`TumblingWindow`, `VectorReducer`) so `TreeBuilder` resolves them from the JSON `type` field.
 - Unit tests at `tests/nodes/TumblingWindowTest.cpp` and `tests/nodes/VectorReducerTest.cpp` covering: per-period boundary emit + reset, empty-bucket no-emit, late-arriving values within a bucket all contribute, concurrent `onValue` from multiple threads, shutdown joins the timer cleanly.
@@ -51,7 +51,7 @@ Per-minute OHLC = four such expressions (max for high, min for low, first for op
 2. A composed pipeline `VectorReducer(max) ← TumblingWindow(periodMs=1000) ← Listener(NEXO,highPrice)` subscribed via WS with a feed pushing 100 ticks/s emits one scalar per second for ≥ 3 consecutive seconds; the value matches the max of the ticks within that boundary (assertable in an integration test).
 3. With no upstream values for an entire `periodMs`, no value frame is emitted for that boundary — verified by counting downstream emits over 5 empty boundaries.
 4. `TreeBuilder` builds a valid DAG from a JSON config that uses both new node types nested in the example shape; an unknown `fn` for `VectorReducer` produces a build-time error frame, not a silent no-op.
-5. `mage Bench` (or the existing `gma_tests` bench harness) confirms `TumblingWindow.onValue` is allocation-bounded by amortized vector growth (no per-tick `new` after the buffer reaches steady-state capacity); `VectorReducer.onValue` is 0 allocs/op for the built-in fns.
+5. `mage Bench` (or the existing `krn_tests` bench harness) confirms `TumblingWindow.onValue` is allocation-bounded by amortized vector growth (no per-tick `new` after the buffer reaches steady-state capacity); `VectorReducer.onValue` is 0 allocs/op for the built-in fns.
 6. `shutdown()` on a live `TumblingWindow` joins the timer thread within the existing engine shutdown deadline; verified by a test that constructs, starts, and shuts down 100× back-to-back without thread leaks (`ASAN`/`TSAN` clean if the suite uses them).
 7. Documentation: a worked example in `docs/window-nodes.md` (or appended to `docs/atomic-keys.md`) showing the OHLC composition (4 expressions) and the empty-bucket semantics.
 
@@ -59,18 +59,18 @@ Per-minute OHLC = four such expressions (max for high, min for low, first for op
 
 - **Performance:** the per-tick path through `TumblingWindow.onValue` should match `Worker.onValue` within margin (single mutex-protected vector append). The per-boundary emit (vector copy + reset) is amortized; allocations there are acceptable since they fire once per `periodMs`, not once per tick.
 - **Compatibility:** no wire-protocol changes. New node types are additive in the `TreeBuilder` JSON; existing pipelines continue to build and run unchanged. `treaty` is untouched.
-- **Dependencies:** none — internal-only change to GMA_V3. Embassy ferrying of `pipeline_json` already supports any node `TreeBuilder` builds; no embassy or forum work here.
+- **Dependencies:** none — internal-only change to krn. Embassy ferrying of `pipeline_json` already supports any node `TreeBuilder` builds; no embassy or forum work here.
 - **Deadline:** none. Unblocks the saved-chart-slice follow-up but is not on its critical path (running OHLC works for the demo today).
 
 ## Affected systems / callers
 
-- `GMA_V3/include/gma/nodes/TumblingWindow.hpp` + `GMA_V3/src/nodes/TumblingWindow.cpp` — new.
-- `GMA_V3/include/gma/nodes/VectorReducer.hpp` + `GMA_V3/src/nodes/VectorReducer.cpp` — new.
-- `GMA_V3/src/core/NodeRegistry.cpp::registerBuiltinNodeTypes` (or `src/core/TreeBuilder.cpp`'s builder-registration block — confirm at implementation time) — two new `NodeTypeRegistry::registerNodeType` entries.
-- `GMA_V3/src/core/FunctionRegistry.cpp` — add `first` / `last` if they aren't already registered; no other changes.
-- `GMA_V3/tests/nodes/TumblingWindowTest.cpp` + `tests/nodes/VectorReducerTest.cpp` — new.
-- `GMA_V3/tests/test_bootstrap.cpp` — verify the new registry installations land in the global gtest Environment.
-- `GMA_V3/docs/window-nodes.md` (or addendum to `docs/atomic-keys.md`) — new doc.
+- `krn/include/krn/nodes/TumblingWindow.hpp` + `krn/src/nodes/TumblingWindow.cpp` — new.
+- `krn/include/krn/nodes/VectorReducer.hpp` + `krn/src/nodes/VectorReducer.cpp` — new.
+- `krn/src/core/NodeRegistry.cpp::registerBuiltinNodeTypes` (or `src/core/TreeBuilder.cpp`'s builder-registration block — confirm at implementation time) — two new `NodeTypeRegistry::registerNodeType` entries.
+- `krn/src/core/FunctionRegistry.cpp` — add `first` / `last` if they aren't already registered; no other changes.
+- `krn/tests/nodes/TumblingWindowTest.cpp` + `tests/nodes/VectorReducerTest.cpp` — new.
+- `krn/tests/test_bootstrap.cpp` — verify the new registry installations land in the global gtest Environment.
+- `krn/docs/window-nodes.md` (or addendum to `docs/atomic-keys.md`) — new doc.
 
 ## Alternatives considered
 

@@ -4,7 +4,7 @@
 **Date:** 2026-05-01
 **Status:** Approved
 **Author:** ndrandal
-**Repo:** GMA_V3
+**Repo:** krn
 
 ## Problem
 
@@ -23,7 +23,7 @@ Add a live-socket test under `tests/ws/WebSocketE2ETest.cpp` that boots a real `
   - **`LegacySymbolAlias`** — send a request using the deprecated `"symbol"` key at top level (instead of `"streamKey"`), assert the server accepts it and the resulting pipeline behaves identically to the canonical form. This is the explicit ADR-004 closer.
 - Use Boost.Beast WS client APIs already linked into the engine (no new third-party deps).
 - Each test scenario uses an independent `io_context` for the client to avoid coupling between fixtures.
-- Wire the test under the existing `gma_tests` GLOB; no new CMake target.
+- Wire the test under the existing `krn_tests` GLOB; no new CMake target.
 
 ## Non-goals
 
@@ -62,7 +62,7 @@ Add a live-socket test under `tests/ws/WebSocketE2ETest.cpp` that boots a real `
 ## Alternatives considered
 
 - **Use the existing in-process bridge for "E2E" coverage.** Rejected: defeats the purpose. ADR-001 explicitly deferred the live-socket case; we're closing that deferral.
-- **Run the test against the running `gma_server` binary as a black-box.** Rejected: too much CI plumbing for the value; in-process Beast is sufficient and far easier to debug.
+- **Run the test against the running `krn_server` binary as a black-box.** Rejected: too much CI plumbing for the value; in-process Beast is sufficient and far easier to debug.
 - **Skip the legacy-symbol case and let ENC-50 close ADR-004.** Rejected: ADR-004 is currently the AC6 gap; closing it now means ENC-50 can drop the alias safely later (it has end-to-end coverage to point at).
 
 ## Risks

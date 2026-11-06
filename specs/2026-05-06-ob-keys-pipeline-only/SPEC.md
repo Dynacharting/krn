@@ -4,7 +4,7 @@
 **Date:** 2026-05-06
 **Status:** Draft
 **Author:** ndrandal
-**Repos:** `GMA_V3` (docs + nodes/Listener), `customer-layer` (apps/web TS types), `forum` (db/seed reshape)
+**Repos:** `krn` (docs + nodes/Listener), `customer-layer` (apps/web TS types), `forum` (db/seed reshape)
 **Linear:** ENC-101
 
 ## Problem
@@ -50,20 +50,20 @@ push and order-book-derived state).
 
 ## Scope
 
-- **`GMA_V3/docs/atomic-keys.md`** — replace ENC-94's
+- **`krn-common/docs/atomic-keys.md`** — replace ENC-94's
   "subscribe to these for L2 sources" framing for `ob.*` with the
   push-vs-pull asymmetry: bare keys are push-fed via MarketTA,
   `ob.*` is pull-only via AtomicStore. Document the canonical
   Listener-clock + AtomicAccessor pattern with a worked example
   (the same NEXO/VALT case the PoC ran).
-- **`GMA_V3/include/gma/nodes/Listener.hpp`** + **`src/nodes/Listener.cpp`** —
+- **`krn/include/krn/nodes/Listener.hpp`** + **`src/nodes/Listener.cpp`** —
   `Listener` constructor (or `start()`) returns / throws / refuses
   registration when `field_` matches the `ob.*` namespace. Surface
   via a `Result`-shaped factory (matches the rest of the codebase's
-  `Result.hpp` pattern; see `include/gma/Result.hpp`). The error
+  `Result.hpp` pattern; see `include/krn/Result.hpp`). The error
   message names the field, points at `docs/atomic-keys.md`, and
   suggests the AtomicAccessor alternative.
-- **`GMA_V3/src/core/TreeBuilder.cpp`** — wire the new factory so
+- **`krn/src/core/TreeBuilder.cpp`** — wire the new factory so
   a graph that names `ob.*` on a Listener fails to build with the
   same error, before `start()`.
 - **`customer-layer/apps/web/src/types/pipeline-graph.ts`** —
@@ -95,14 +95,14 @@ push and order-book-derived state).
   could mis-generate a Listener-on-`ob.*`. When real AI boxes
   replace aibox-mock, the prompt update lands as part of that
   migration, informed by the doc this proposal produces.
-- **No GMA_V3 perf changes.** `ObProvider` stays pull-only and the
+- **No krn perf changes.** `ObProvider` stays pull-only and the
   `Listener` reject is a single string-prefix check at construct
   time, so nothing on a per-tick path moves. Nothing in this repo
   measures that today — see **Corrections C1**.
   ~~Hot-path benchmarks (`PackAppend` 0.85 ns/op / 0 allocs;
   `OrchestratorThroughput` ≥40M ops/sec) must remain unchanged.~~
   — **struck 2026-09-19 (ENC-1269): both are *embassy* Go
-  benchmarks, not GMA_V3 ones, and both figures are
+  benchmarks, not krn ones, and both figures are
   stub-broadcaster numbers. C1.**
 - **No backward-compat shim.** No production deployment has a
   Listener on `ob.*` that fires today (it never did); making the
@@ -111,7 +111,7 @@ push and order-book-derived state).
 
 ## Acceptance criteria
 
-1. **Docs**: `gma_v3/docs/atomic-keys.md` contains a section titled
+1. **Docs**: `krn-common/docs/atomic-keys.md` contains a section titled
    "push vs pull" that names the asymmetry, lists the canonical
    pattern, and includes the NEXO/VALT worked example. The misleading
    "subscribe to these for L2 sources" wording is gone.
@@ -122,7 +122,7 @@ push and order-book-derived state).
    `pipeline-only` and the field name.
 3. **TreeBuilder rejects ob.\* listener** at graph-build time
    when a JSON spec names `kind=listener` with `field=ob.best.bid.price`;
-   error surfaces in `mage Test` (gma_v3 ws tests) without the
+   error surfaces in `mage Test` (krn ws tests) without the
    graph reaching `start()`.
 4. **TypeScript compile-time guard**: `pnpm --filter
    @customer-layer/web build` fails if a developer assigns
@@ -139,26 +139,26 @@ push and order-book-derived state).
    AtomicAccessor(NEXO.ob.best.bid.price) → Responder`) emits
    non-zero updates within 15s — the same window where ENC-101's
    original repro saw zero. Documented in
-   `gma_v3/docs/atomic-keys.md` as a self-contained `apps/poc-client`
+   `krn-common/docs/atomic-keys.md` as a self-contained `apps/poc-client`
    command.
 7. ~~**No bench regression**: `mage Bench` on embassy and
-   `mage Bench` on gma_v3 (if present) report unchanged numbers
+   `mage Bench` on krn (if present) report unchanged numbers
    for `PackAppend` / hot-path benchmarks (within ±2%).~~
    — **struck 2026-09-19 (ENC-1269): unrunnable as written.
-   GMA_V3 has no `mage` target and no `PackAppend`; `PackAppend`
+   krn has no `mage` target and no `PackAppend`; `PackAppend`
    is embassy's. ±2% is also below the run-to-run noise of a
    sub-nanosecond Go microbenchmark. See Corrections C1.**
 
 ## Constraints
 
-- **Performance:** No changes to gma_v3 hot path; ObProvider stays
+- **Performance:** No changes to krn hot path; ObProvider stays
   pull-only. Listener construct gains one string-prefix check
   (sub-microsecond).
 - **Compatibility:** Listener-on-`ob.*` was always silently broken;
   making it an explicit construct-time error is strictly an
   improvement, not a wire-format or API break. No proto / treaty
   changes.
-- **Dependencies:** None. Self-contained within GMA_V3 +
+- **Dependencies:** None. Self-contained within krn +
   customer-layer types + forum seed.
 - **Deadline:** None declared. Useful as a follow-up to
   `mvp-deploy-prep` (closes the open assumption in ENC-94's
@@ -166,13 +166,13 @@ push and order-book-derived state).
 
 ## Affected systems / callers
 
-- **`GMA_V3/include/gma/nodes/Listener.hpp` +
+- **`krn/include/krn/nodes/Listener.hpp` +
   `src/nodes/Listener.cpp`** — factory or `start()` gains the
   reject path.
-- **`GMA_V3/src/core/TreeBuilder.cpp`** — surfaces the reject
+- **`krn/src/core/TreeBuilder.cpp`** — surfaces the reject
   during graph build.
-- **`GMA_V3/docs/atomic-keys.md`** — sharpens ENC-94's doc.
-- **`GMA_V3/CLAUDE.md`** — one-line cross-reference under "Code
+- **`krn-common/docs/atomic-keys.md`** — sharpens ENC-94's doc.
+- **`krn/CLAUDE.md`** — one-line cross-reference under "Code
   Conventions" (the document already lists ENC-94's pointer; this
   proposal extends the wording).
 - **`customer-layer/apps/web/src/types/pipeline-graph.ts`** —
@@ -184,7 +184,7 @@ push and order-book-derived state).
   reflect the new node count (Listener + AtomicAccessor + Worker
   + Responder = 4 nodes vs current 2).
 
-No `treaty/` changes. No `embassy/` changes (data plane / GMA
+No `treaty/` changes. No `embassy/` changes (data plane / KRN
 client are unaffected).
 
 ## Alternatives considered
@@ -203,7 +203,7 @@ client are unaffected).
   `ob.*`.** Rejected: it's strictly a subset of what the existing
   `Interval → AtomicAccessor` pipeline composition already
   expresses. Adding it as a first-class wire shape costs treaty
-  + forum + embassy + gma_v3 touchpoints to reproduce something
+  + forum + embassy + krn touchpoints to reproduce something
   callers can build today.
 - **Status-quo + AI-prompt-only fix.** Rejected: makes the
   failure mode "AI-generated pipelines work, hand-rolled graphs
@@ -245,11 +245,11 @@ client are unaffected).
 
 Struck in place and dated, never deleted — the house convention
 (`DynaCharting/LIMITATIONS.md` §C, `HANDOFF-2026-09-16.md`), and the rule
-`specs/2026-09-14-gma-flow-control-replay/recheck.sh` is written against
+`specs/2026-09-14-krn-flow-control-replay/recheck.sh` is written against
 (*"the row struck through — D9: nothing is deleted"*). A reader who
 half-remembers the wrong version needs to find the correction, not a silence.
 
-### C1 — this SPEC gated on two embassy Go benchmarks, presented as GMA_V3 ones
+### C1 — this SPEC gated on two embassy Go benchmarks, presented as krn ones
 
 **Struck 2026-09-19 under ENC-1269**, from the ENC-1263 performance-claim
 audit (`workspace:specs/2026-09-19-chart-quality-bar/PERF-CLAIMS.md` row B6).
@@ -262,9 +262,9 @@ AC#7's ±2% restatement of it.
 
 **Neither benchmark is in this repo.** `BenchmarkPackAppend` is
 `embassy/internal/pipeline/binary_test.go:46`; `BenchmarkOrchestratorThroughput`
-is `embassy/bench/throughput_bench_test.go:28`. Both are Go. GMA_V3 is C++20 and
+is `embassy/bench/throughput_bench_test.go:28`. Both are Go. krn is C++20 and
 has no Go toolchain, no `mage` target, and no function of either name — so no
-GMA_V3 build, test or CI step ever evaluated this clause. It sat unchallenged
+krn build, test or CI step ever evaluated this clause. It sat unchallenged
 from 2026-05-06.
 
 **Where the numbers came from.** `customer-layer/specs/2026-05-02-go-backend-rewrite/DECISIONS.md:318-322`
@@ -304,20 +304,20 @@ It does not. `2.463 ns/op` is `BenchmarkOrchestratorRouteValue`, not
 exactly two committed places: ADR-014 itself and this SPEC. The defect is that
 it carries no conditions, not that it disagrees with itself.
 
-**Not re-measured, deliberately.** A GMA_V3 design record must not carry an
+**Not re-measured, deliberately.** A krn design record must not carry an
 embassy benchmark number at all — re-measuring would reproduce the
-misattribution with fresher digits. The number that belongs here is a **GMA_V3**
-one, and there is none: `GMA_BUILD_BENCHMARKS` is `OFF` by default
+misattribution with fresher digits. The number that belongs here is a **krn**
+one, and there is none: `KRN_BUILD_BENCHMARKS` is `OFF` by default
 (`CMakeLists.txt:6`), the five suites under `benchmarks/` get no `add_test`
-registration, and nothing in CI runs them — so *"no GMA_V3 perf changes"* is
-today an assertion about the diff, not a measurement. **ENC-997** (*"[GMA_V3]
+registration, and nothing in CI runs them — so *"no krn perf changes"* is
+today an assertion about the diff, not a measurement. **ENC-997** (*"[krn]
 Commit a real performance baseline"*) owns closing that with a `BASELINE.md`
 and a perf job; this correction discharges only its *"false numbers deleted or
 corrected"* clause.
 
-**Same defect, noted but not changed:** AC#3 gates on *"`mage Test` (gma_v3 ws
+**Same defect, noted but not changed:** AC#3 gates on *"`mage Test` (krn ws
 tests)"*. There is no `mage` in this repo either — tests are
-`cmake -B build -DGMA_BUILD_TESTS=ON && ctest --test-dir build`. It is not a
+`cmake -B build -DKRN_BUILD_TESTS=ON && ctest --test-dir build`. It is not a
 performance claim, so it is left standing and recorded here; it belongs to
 ENC-997.
 

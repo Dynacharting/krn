@@ -4,7 +4,7 @@
 **Date:** 2026-05-01
 **Status:** Approved
 **Author:** ndrandal
-**Repo:** GMA_V3
+**Repo:** krn
 
 ## Problem
 
@@ -23,7 +23,7 @@ Engine owns ingress. Connectors register named `IngressFactory`s with `IngressRe
 - New engine-side ingress driver in the composition root (`main.cpp`): after `dispatchPendingKeys`, iterate `cfg.ingress[]`, build each via `IngressRegistry::find(kind)`, push into `std::vector<std::unique_ptr<IIngressSource>>`, start them in registration order, register a single `ingress-stop` shutdown step at priority 35 that stops them in reverse order.
 - `Config` gains a strongly typed `ingress` vector of `{kind, name, params: map<string,string>}` populated from `ingress.N.*` keys via either an engine-owned parser or a generic dispatch. Pick the same pattern used for the existing `feeds.N.*` keys to keep things consistent — minor refactor.
 - `MarketConnector::start()` no longer constructs or runs `FeedServer` / `WsFeedClient`. Its responsibility shrinks to applying `allowNegativePrices` to the `OrderBookManager` and any other connector-only state. `MarketConnector::stop()` similarly drops feed-server and ws-client teardown — those are now driven by `ingress-stop`.
-- Update `gma.conf` defaults: encode the current implicit feed server as `ingress.0.kind = market.feedserver`, `ingress.0.port = 9001` (or read from `feedPort`).
+- Update `krn.conf` defaults: encode the current implicit feed server as `ingress.0.kind = market.feedserver`, `ingress.0.port = 9001` (or read from `feedPort`).
 - Update `tests/test_bootstrap.cpp`: registerWith remains; no live ingress sources are constructed because no `ingress.N.*` keys are present in the default test Config.
 - New `IngressFactoryDispatchTest`: register a fake factory under a unique name, populate `cfg.ingress[]` synthetically, run the engine-side driver loop (extracted into a helper), assert exactly one `IIngressSource` was built with the expected params and that `start()` / `stop()` were called in order.
 
@@ -42,7 +42,7 @@ Engine owns ingress. Connectors register named `IngressFactory`s with `IngressRe
 2. `MarketConnector::start()` source contains zero references to `FeedServer::run` and `WsFeedClient::start`. `MarketConnector::stop()` likewise contains no calls into those types.
 3. Loading an INI with `ingress.0.kind = market.feedserver, ingress.0.port = 9100` plus `ingress.1.kind = market.wsclient, ingress.1.url = ws://x` produces two `IIngressSource` instances after the engine-side driver runs, both of which receive `start()` exactly once.
 4. The new `ingress-stop` shutdown step at priority 35 stops sources in reverse-registration order; verified by a test using two trivial mock `IIngressSource`s recording call order.
-5. Existing `gma_server` boot path still listens on the configured `feedPort` end-to-end (smoke test or `ss -tln`).
+5. Existing `krn_server` boot path still listens on the configured `feedPort` end-to-end (smoke test or `ss -tln`).
 6. `ctest --output-on-failure` green; no test that was passing before this ticket regresses.
 7. `IngressFactory`'s typedef takes a single `EngineRegistries&` argument; the legacy three-arg signature is deleted.
 
@@ -55,13 +55,13 @@ Engine owns ingress. Connectors register named `IngressFactory`s with `IngressRe
 
 ## Affected systems / callers
 
-- `include/gma/engine/IngressRegistry.hpp` — `IngressFactory` signature change.
-- `include/gma/engine/IConnector.hpp` — no API change; lifecycle docs gain a one-line note that ingress lifecycle is engine-driven.
+- `include/krn/engine/IngressRegistry.hpp` — `IngressFactory` signature change.
+- `include/krn/engine/IConnector.hpp` — no API change; lifecycle docs gain a one-line note that ingress lifecycle is engine-driven.
 - `connectors/market/src/MarketConnector.cpp` — register factories; shrink `start()`/`stop()`.
-- `connectors/market/include/gma/server/FeedServer.hpp` + `connectors/market/include/gma/ws/WsFeedClient.hpp` — adapt to `IIngressSource` (small wrapper class or direct inheritance).
+- `connectors/market/include/krn/server/FeedServer.hpp` + `connectors/market/include/krn/ws/WsFeedClient.hpp` — adapt to `IIngressSource` (small wrapper class or direct inheritance).
 - `src/main.cpp` — new engine-side driver loop; new `ingress-stop` step.
-- `include/gma/util/Config.hpp` + `src/util/Config.cpp` — `ingress` vector field + parsing.
-- `src/util/gma.conf` — default `ingress.*` block.
+- `include/krn/util/Config.hpp` + `src/util/Config.cpp` — `ingress` vector field + parsing.
+- `src/util/krn.conf` — default `ingress.*` block.
 - `tests/test_bootstrap.cpp` — no change beyond ensuring registerWith still works.
 - New `tests/engine/IngressFactoryDispatchTest.cpp`.
 
@@ -78,4 +78,4 @@ Engine owns ingress. Connectors register named `IngressFactory`s with `IngressRe
 
 ## Open questions
 
-- Exact mechanism for per-ingress config keys: a `std::map<string,string>` blob on each `Config::Ingress{}` entry, or factories read from a `ConfigReaderFn` registered for the kind's namespace? Resolved in `/plan` once the parser shape is confirmed against gma.conf samples.
+- Exact mechanism for per-ingress config keys: a `std::map<string,string>` blob on each `Config::Ingress{}` entry, or factories read from a `ConfigReaderFn` registered for the kind's namespace? Resolved in `/plan` once the parser shape is confirmed against krn.conf samples.

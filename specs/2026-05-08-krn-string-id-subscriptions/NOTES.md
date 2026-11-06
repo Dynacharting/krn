@@ -6,19 +6,19 @@ Mid-execution finding from
 `embassy-saved-scene-dispatch` phase 2 task 1 (per ADR-001 in
 that proposal's DECISIONS.md). Phase 1's instrumentation surfaced
 that embassy successfully sends 7 subscribe messages per
-saved-scene InstructionPackage but gma_v3 logs zero `ws.subscribe`
+saved-scene InstructionPackage but krn logs zero `ws.subscribe`
 activity — a wire-protocol mismatch, not anything in the original
 spec's hypothesis list.
 
 ## Live finding
 
-- gma's parser at `src/server/ClientSession.cpp:344-357` accepts
+- krn's parser at `src/server/ClientSession.cpp:344-357` accepts
   `key:int` or fallback `id:int`; rejects with
   `sendError("subscribe", "request missing integer 'key'")` and
   `continue` on anything else.
 - Embassy sends `{id:"r-NEXO-open", streamKey:..., field:...}` —
   `id` is a string.
-- Bidirectional mismatch: gma's value-update frames emit
+- Bidirectional mismatch: krn's value-update frames emit
   `{key:int, streamKey, value}`; embassy's `inboundProbe` reads
   `requestId:"string"`.
 - Smoke.js (`tools/smoke-test/smoke.js`) uses int-keyed wire and
@@ -28,7 +28,7 @@ spec's hypothesis list.
 ## Forks resolved
 
 - **Q1 — fix shape (from ADR-001 in embassy-saved-scene-dispatch):**
-  Option A (gma_v3 accepts string IDs natively). Chosen for
+  Option A (krn accepts string IDs natively). Chosen for
   two-plane-rule alignment: data plane owns the identifier contract.
 - **Q2 — internal representation:** Option B (variant<int, string>
   across the int-keyed surface — Responder.key_, ClientSession's
@@ -43,7 +43,7 @@ spec's hypothesis list.
 ## Memory referenced
 
 - Two-plane rule (`feedback_two_plane_rule.md`) — the request-key
-  contract belongs to the data plane. gma is the data plane. ✓
+  contract belongs to the data plane. krn is the data plane. ✓
 - Always-ticket-on-Linear (`feedback_always_ticket_linear.md`) —
   this proposal will sync to Linear after /plan.
 
