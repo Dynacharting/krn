@@ -1,7 +1,7 @@
 # SPEC: document atomic-key namespaces (bare vs ob.*)
 
 **Slug:** atomic-keys-doc · **Date:** 2026-05-01 · **Status:** Approved
-**Repo:** GMA_V3 (+ customer-layer touch) · **Linear:** ENC-94
+**Repo:** krn (+ customer-layer touch) · **Linear:** ENC-94
 
 ## Problem
 
@@ -16,7 +16,7 @@ nothing tells a user (or the AI compile prompt) which to use when.
 
 ## Proposed change
 
-Doc-only. Add `gma_v3/docs/atomic-keys.md` describing the two
+Doc-only. Add `krn/docs/atomic-keys.md` describing the two
 namespaces, their sources, the full `ob.*` catalog, and when to
 pick which. Surface a pointer from `CLAUDE.md`. Update
 `customer-layer/apps/server/src/services/ai-compile-prompt.ts` so
@@ -25,7 +25,7 @@ rather than bare `bid`.
 
 ## Scope
 
-- New `gma_v3/docs/atomic-keys.md` covering:
+- New `krn/docs/atomic-keys.md` covering:
   - The two namespaces and the design intent (preserve "feed gave us
     this" vs "we derived this from order-book state").
   - Bare key vocabulary: `lastPrice`, `openPrice`, `highPrice`,
@@ -38,7 +38,7 @@ rather than bare `bid`.
     discoverable source.
   - Decision rule: pre-aggregated tick connector ⇒ bare; L2/L3
     ⇒ `ob.*`; never both for the same field.
-- `gma_v3/CLAUDE.md` Code Conventions: one bullet pointing at
+- `krn/CLAUDE.md` Code Conventions: one bullet pointing at
   `docs/atomic-keys.md`.
 - `customer-layer/apps/server/src/services/ai-compile-prompt.ts`:
   rewrite the "Atomic keys directly subscribable in the field"
@@ -67,15 +67,15 @@ rather than bare `bid`.
 
 ## Acceptance criteria
 
-1. `gma_v3/docs/atomic-keys.md` exists and contains both vocabulary
+1. `krn/docs/atomic-keys.md` exists and contains both vocabulary
    lists plus the decision rule.
-2. `gma_v3/CLAUDE.md` has a one-line bullet referencing
+2. `krn/CLAUDE.md` has a one-line bullet referencing
    `docs/atomic-keys.md`.
 3. `customer-layer/apps/server/src/services/ai-compile-prompt.ts`'s
    `SCHEMA_REFERENCE` mentions `ob.best.bid.price`, `ob.best.ask.price`,
    `ob.spread`, `ob.mid` explicitly.
 4. The doc page transcribes every entry in
-   `connectors/market/include/gma/ob/ObKeysCatalog.hpp::canonicalKeys`,
+   `connectors/market/include/krn/ob/ObKeysCatalog.hpp::canonicalKeys`,
    verifiable by spot check.
 5. A re-run of the 2026-05-01 PoC client subscribing to
    `(NEXO, ob.best.bid.price)` against feed-sim produces non-zero
@@ -91,8 +91,8 @@ rather than bare `bid`.
 
 ## Affected systems
 
-- `gma_v3/docs/atomic-keys.md` (new)
-- `gma_v3/CLAUDE.md` (one-line addition)
+- `krn/docs/atomic-keys.md` (new)
+- `krn/CLAUDE.md` (one-line addition)
 - `customer-layer/apps/server/src/services/ai-compile-prompt.ts`
   (rewrite the atomic-keys section of SCHEMA_REFERENCE)
 

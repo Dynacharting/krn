@@ -1,4 +1,4 @@
-# PLAN: GMA windowing primitives — TumblingWindow + VectorReducer
+# PLAN: KRN windowing primitives — TumblingWindow + VectorReducer
 
 **Spec:** [SPEC.md](./SPEC.md)
 **Date:** 2026-05-12
@@ -16,7 +16,7 @@ Two phases — one per node — each shippable on its own. Phase 1 lands `Tumbli
 
 **Tasks:**
 
-1. **`include/gma/nodes/TumblingWindow.hpp`** — class declaration mirroring `BucketTime`'s shape: `final` class extending `INode` and `enable_shared_from_this<TumblingWindow>`. Members: `period_`, `pool_`, `downstream_` (single `shared_ptr<INode>`), per-symbol buffer `unordered_map<string, vector<double>>`, `mx_` mutex, `cv_`, `stopping_`/`started_` atomics, `timerThread_`. Public surface: ctor `(period, downstream, pool)`, `start()`, `onValue(StreamValue)` override (the upstream tap), `shutdown() noexcept` override, public-static `nextAlignedAfter` reused from `BucketTime` (or a copy if cross-include is awkward).
+1. **`include/krn/nodes/TumblingWindow.hpp`** — class declaration mirroring `BucketTime`'s shape: `final` class extending `INode` and `enable_shared_from_this<TumblingWindow>`. Members: `period_`, `pool_`, `downstream_` (single `shared_ptr<INode>`), per-symbol buffer `unordered_map<string, vector<double>>`, `mx_` mutex, `cv_`, `stopping_`/`started_` atomics, `timerThread_`. Public surface: ctor `(period, downstream, pool)`, `start()`, `onValue(StreamValue)` override (the upstream tap), `shutdown() noexcept` override, public-static `nextAlignedAfter` reused from `BucketTime` (or a copy if cross-include is awkward).
 
 2. **`src/nodes/TumblingWindow.cpp`** — implement:
    - `onValue`: under `mx_`, `acc_[sv.symbol].push_back(toDouble(sv.value))`. Use the same `MAX_SYMBOLS` cap as `Worker.cpp:20-25` to refuse unbounded growth.
@@ -40,12 +40,12 @@ Two phases — one per node — each shippable on its own. Phase 1 lands `Tumbli
 
 **Verification:**
 ```sh
-cd GMA_V3 && bash tools/compile.sh build-debug   # configures + builds Debug w/ GMA_BUILD_TESTS=ON
+cd krn && bash tools/compile.sh build-debug   # configures + builds Debug w/ KRN_BUILD_TESTS=ON
 cd build-debug
-./gma_tests --gtest_filter='TumblingWindowTest.*' --gtest_brief=1   # 5 tests pass
+./krn_tests --gtest_filter='TumblingWindowTest.*' --gtest_brief=1   # 5 tests pass
 ctest --output-on-failure                                            # full suite green (regression gate)
 ```
-Note: the test suite is a single CTest target (`gma_tests`) wrapping all
+Note: the test suite is a single CTest target (`krn_tests`) wrapping all
 GoogleTest cases — `ctest -R` filters CTest names, not GoogleTest names,
 so filter at the GoogleTest layer via `--gtest_filter`.
 
@@ -64,7 +64,7 @@ so filter at the GoogleTest layer via `--gtest_filter`.
 
 **Tasks:**
 
-1. **`include/gma/nodes/VectorReducer.hpp`** — declare a small `final` class extending `INode`. Members: `fn_` (`krn::Func` from `FunctionMap.hpp:10` — already `double(const vector<double>&)`), `downstream_` (`shared_ptr<INode>`), `stopping_` atomic, `mx_` (only for `downstream_` swap on shutdown). Ctor `(Func, shared_ptr<INode>)`. Override `onValue` (extracts `vector<double>` from the variant `sv.value`, applies `fn_`, emits `StreamValue{symbol, double}`) and `shutdown() noexcept`.
+1. **`include/krn/nodes/VectorReducer.hpp`** — declare a small `final` class extending `INode`. Members: `fn_` (`krn::Func` from `FunctionMap.hpp:10` — already `double(const vector<double>&)`), `downstream_` (`shared_ptr<INode>`), `stopping_` atomic, `mx_` (only for `downstream_` swap on shutdown). Ctor `(Func, shared_ptr<INode>)`. Override `onValue` (extracts `vector<double>` from the variant `sv.value`, applies `fn_`, emits `StreamValue{symbol, double}`) and `shutdown() noexcept`.
 
 2. **`src/nodes/VectorReducer.cpp`** — implement `onValue`: if `sv.value` doesn't hold `vector<double>`, log at `Warn` (`"VectorReducer: non-vector input dropped"`) and drop. Otherwise apply `fn_` to the held vector, construct `StreamValue{sv.symbol, ArgType{double}}`, snapshot `downstream_` under the lock, release, call downstream. Catches reducer exceptions same way `Worker.cpp:33-41` does (log `Error`, drop the value, leave state consistent).
 
@@ -82,17 +82,17 @@ so filter at the GoogleTest layer via `--gtest_filter`.
 
 7. **`docs/window-nodes.md` (full)** — flesh out from Phase 1's stub: JSON shape for both nodes, the OHLC worked example (4 expressions for high/low/open/close), the empty-bucket no-emit semantics, the alignment guarantee inherited from `BucketTime`, and a one-line "follow-up: saved-chart-slice seed switch" pointer.
 
-8. **Bench gate** — run `cd build && ctest -R Bench` (or `mage Bench` if the existing target wraps it) and capture `BenchmarkOrchestratorRouteValue`-equivalent numbers (or whichever GMA bench exists for the per-tick path) before and after; assert no regression. The new nodes don't sit on the per-tick fast path of *existing* pipelines, so this should be a no-op verification — included to defend against accidental coupling.
+8. **Bench gate** — run `cd build && ctest -R Bench` (or `mage Bench` if the existing target wraps it) and capture `BenchmarkOrchestratorRouteValue`-equivalent numbers (or whichever KRN bench exists for the per-tick path) before and after; assert no regression. The new nodes don't sit on the per-tick fast path of *existing* pipelines, so this should be a no-op verification — included to defend against accidental coupling.
 
 **Dependencies:** Phase 1 merged.
 
 **Verification:**
 ```sh
-cd GMA_V3/build-debug
-./gma_tests --gtest_filter='VectorReducerTest.*:WindowReducerCompositionTest.*' --gtest_brief=1   # 6 tests pass
+cd krn/build-debug
+./krn_tests --gtest_filter='VectorReducerTest.*:WindowReducerCompositionTest.*' --gtest_brief=1   # 6 tests pass
 ctest --output-on-failure                                                                          # full suite green
 
-# Benches: configure a Release tree with -DGMA_BUILD_BENCHMARKS=ON and
+# Benches: configure a Release tree with -DKRN_BUILD_BENCHMARKS=ON and
 # run each microbench by name (the combined run can hang with multiple
 # TumblingWindow instances + ThreadPool teardowns in one process).
 cd ../build-bench
@@ -101,7 +101,7 @@ cd ../build-bench
 ./bench_window_nodes  --benchmark_filter=BM_VectorReducer_Sum      --benchmark_min_time=1s
 ./bench_window_nodes  --benchmark_filter=BM_TumblingWindow         --benchmark_min_time=1s
 ```
-Note: the gtest suite is a single CTest target (`gma_tests`) wrapping all
+Note: the gtest suite is a single CTest target (`krn_tests`) wrapping all
 GoogleTest cases — `ctest -R` filters CTest names, not GoogleTest names,
 so filter at the GoogleTest layer via `--gtest_filter` (same caveat as
 Phase 1).
@@ -117,7 +117,7 @@ Phase 1).
 
 ## Cross-cutting concerns
 
-- **Migrations:** none. No schema, no wire-protocol, no config-file changes. `gma.conf` is untouched.
+- **Migrations:** none. No schema, no wire-protocol, no config-file changes. `krn.conf` is untouched.
 - **Observability:** the existing `krn::util::logger` is used for the two new warn/error paths (per-symbol cap, non-vector input, reducer exception). No new metrics — both nodes sit off the smoke's measured surface.
 - **Docs:** `docs/window-nodes.md` (new). `CLAUDE.md` Code Conventions section gets a one-liner on the new node types only if Phase 2 surfaces a convention worth pinning (e.g., the empty-bucket no-emit choice) — defer to /verify time.
 

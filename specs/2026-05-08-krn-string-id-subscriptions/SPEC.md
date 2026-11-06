@@ -1,14 +1,14 @@
-# SPEC: gma_v3 — string IDs on the WS subscribe protocol
+# SPEC: krn — string IDs on the WS subscribe protocol
 
 **Slug:** krn-string-id-subscriptions
 **Date:** 2026-05-08
 **Status:** Draft
 **Author:** ndrandal
-**Repo:** GMA_V3
+**Repo:** krn
 
 ## Problem
 
-gma_v3's WebSocket subscribe protocol only accepts integer request
+krn's WebSocket subscribe protocol only accepts integer request
 keys: `ClientSession::handleSubscribe` at `src/server/ClientSession.cpp:344-357`
 reads `key: int` (or fallback `id: int`) and rejects anything else with
 `sendError("subscribe", "request missing integer 'key'")`. Internally
@@ -16,7 +16,7 @@ the entire request-routing surface — `ClientSession::active_`,
 `ClientSession::chains_`, `Responder.key_`, the `sendFn` callback's
 signature — is `int`-keyed end to end. Embassy (the on-prem agent)
 sends string request IDs derived from forum's saved-scene
-InstructionPackages (e.g. `r-NEXO-open`, `r-NEXO-vwap`); gma silently
+InstructionPackages (e.g. `r-NEXO-open`, `r-NEXO-vwap`); krn silently
 rejects every one of them. The end-to-end saved-chart-slice path has
 been broken at this seam since it was first wired — yesterday's
 smoke worked only because `tools/smoke-test/smoke.js` is its own
@@ -26,7 +26,7 @@ captures the discovery and the chosen fix shape.
 
 ## Proposed change
 
-Generalize gma_v3's request-key surface to accept **both** integer
+Generalize krn's request-key surface to accept **both** integer
 and string keys natively. On subscribe: a request with `key: int` (or
 fallback `id: int`) keeps working exactly as it does today (smoke.js
 + any future int-keyed client are unaffected); a request with
@@ -55,13 +55,13 @@ key-type-agnostic.
   request with both `key` and `id` AND both pass type validation
   is an error (`sendError("subscribe", "request must have key
   (int) OR id (int|string), not both")`).
-- `include/gma/server/ClientSession.hpp:77-78` — change
+- `include/krn/server/ClientSession.hpp:77-78` — change
   `std::unordered_map<int, …> active_` and `chains_` to
   `std::unordered_map<RequestKey, …>`. Define `RequestKey` as
   `std::variant<int, std::string>` in a new header
-  `include/gma/server/RequestKey.hpp` with std::hash specialization
+  `include/krn/server/RequestKey.hpp` with std::hash specialization
   so `unordered_map` works.
-- `include/gma/nodes/Responder.hpp` + `src/nodes/Responder.cpp`:
+- `include/krn/nodes/Responder.hpp` + `src/nodes/Responder.cpp`:
   add a constructor overload (or change the constructor) accepting
   `RequestKey key` instead of `int key`. The `sendFn` typedef
   changes from `std::function<void(int, const StreamValue&)>` to
@@ -78,7 +78,7 @@ key-type-agnostic.
   no-op). Internally normalize to a `std::vector<RequestKey>` and
   iterate; existing `chains_.erase(key)` works against the
   variant-keyed map.
-- New header `include/gma/server/RequestKey.hpp` with the alias and
+- New header `include/krn/server/RequestKey.hpp` with the alias and
   the `std::hash<RequestKey>` specialization. Helper free
   functions: `requestKeyToJSON(key, writer, fieldName)` (writes
   the appropriate field+value pair) and `parseRequestKey(json)`
@@ -110,7 +110,7 @@ key-type-agnostic.
 - **No protobuf / treaty schema change.** Treaty's
   `cloudchannel.v1.GmaSubscriptionRequest` already carries `id`
   as a string; embassy's wire-out shape is already correct upstream
-  of this proposal. The fix lives entirely inside gma_v3.
+  of this proposal. The fix lives entirely inside krn.
 - **No new node kinds.** No new pipeline shapes. The "string-id"
   capability is a request-correlation surface, not a routing
   primitive.
@@ -122,7 +122,7 @@ key-type-agnostic.
   `r["id"].IsInt()` fallback at line 353 is preserved (yesterday's
   smoke uses `key:int`; some clients may still send `id:int`),
   but no new shim translates a stringified-int (`id:"5"`) to an
-  integer key. If a client sends `id:"5"`, gma treats it as the
+  integer key. If a client sends `id:"5"`, krn treats it as the
   string "5", not the integer 5. Matches POLA.
 - **No sovereignty / instruction lifecycle changes.** Forum's
   ack-tracking, embassy's instruction-handler — both untouched
@@ -155,13 +155,13 @@ key-type-agnostic.
    to nothing; subsequent value updates for that subscription
    stop. Cancel with `{type:"cancel", keys:[1]}` continues to
    work as today.
-6. `ctest` / `cmake --build . -t gma_tests` passes including
+6. `ctest` / `cmake --build . -t krn_tests` passes including
    ≥3 new test cases covering the string-key path (subscribe,
    value frame, cancel).
 7. The end-to-end saved-scene smoke from
    `embassy-saved-scene-dispatch` phase 3 (the
    `tools/saved-scene-smoke.sh` script that proposal still
-   needs to ship) passes when run against the gma_v3 build from
+   needs to ship) passes when run against the krn build from
    this proposal. Cross-proposal smoke; soft-AC here, gated in
    the embassy proposal's plan.
 
@@ -175,14 +175,14 @@ key-type-agnostic.
   existing zero-allocation hot path stays zero-allocation: no
   string allocation per value emit (the variant's string is
   stored once at subscribe, pointed-to thereafter). Verify with
-  `mage Bench`-equivalent — gma's existing benchmarks should not
+  `mage Bench`-equivalent — krn's existing benchmarks should not
   regress >2%.
 - **Compatibility:**
   - **Smoke.js** wire-byte-compatible: unchanged.
   - **Embassy** wire-compatible without code change: embassy already
     sends `id:"string"` and reads `requestId:"string"`.
   - **Treaty** schema: unchanged.
-- **Dependencies:** none — this is a self-contained gma_v3 change.
+- **Dependencies:** none — this is a self-contained krn change.
   Embassy's saved-scene fix unblocks once this lands; that's
   tracked in the embassy proposal's phase 2.
 - **Build:** C++20, `std::variant` is in standard. No new third-party.
@@ -194,24 +194,24 @@ key-type-agnostic.
 - `src/server/ClientSession.cpp:344-357` (subscribe parser),
   `:387-413` (sendFn lambda + Responder construction), `:497`
   + `:546` (ack JSON emit), `:516-540` (cancel handler).
-- `include/gma/server/ClientSession.hpp:77-78` (active_, chains_).
-- `include/gma/nodes/Responder.hpp` + `src/nodes/Responder.cpp`.
-- New file: `include/gma/server/RequestKey.hpp` (variant alias,
+- `include/krn/server/ClientSession.hpp:77-78` (active_, chains_).
+- `include/krn/nodes/Responder.hpp` + `src/nodes/Responder.cpp`.
+- New file: `include/krn/server/RequestKey.hpp` (variant alias,
   hash specialization, helpers).
 - New / extended test: `tests/server/StringIDSubscribeTest.cpp`
   (or extension of an existing file).
 - `tools/smoke-test/smoke.js` — read-only contract; new test in
-  embassy or a new gma test exercises the string path.
+  embassy or a new krn test exercises the string path.
 - `docs/atomic-keys.md` — wire-format note.
 
 ## Alternatives considered
 
-- **C — gma adds an optional `requestId` echo on int-keyed value
+- **C — krn adds an optional `requestId` echo on int-keyed value
   frames; clients that want string IDs send a sidecar string
   alongside the int key.** Smaller (~30 LOC C++), keeps internal
   representation int. Rejected per ADR-001: the "real
   architecture" answer puts the identifier contract on the data
-  plane. The two-plane rule favors gma owning the request-key
+  plane. The two-plane rule favors krn owning the request-key
   surface end to end. Option C is held in reserve as a fallback
   if the variant work blocks for >1 week.
 - **Embassy maps string↔int internally** (option B in
@@ -252,10 +252,10 @@ key-type-agnostic.
   green-bar against today's baseline; CI gates it once smoke runs
   in CI.
 - **Outbound `requestId` field name conflicts with existing
-  protocol fields.** gma's outgoing frames already use
+  protocol fields.** krn's outgoing frames already use
   `requestId` in nowhere visible from ClientSession.cpp's grep —
   but `ack` frames may already carry a different field. **Mitigation:**
-  before /plan, grep `gma_v3/src/` for existing `requestId` usage
+  before /plan, grep `krn/src/` for existing `requestId` usage
   and confirm no conflict.
 
 ## Open questions

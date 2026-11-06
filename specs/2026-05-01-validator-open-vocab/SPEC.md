@@ -4,7 +4,7 @@
 **Date:** 2026-05-01
 **Status:** Approved
 **Author:** ndrandal
-**Repo:** GMA_V3
+**Repo:** krn
 
 ## Problem
 

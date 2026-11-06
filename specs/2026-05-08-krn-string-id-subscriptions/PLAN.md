@@ -1,4 +1,4 @@
-# PLAN: gma_v3 — string IDs on the WS subscribe protocol
+# PLAN: krn — string IDs on the WS subscribe protocol
 
 **Spec:** [SPEC.md](./SPEC.md)
 **Date:** 2026-05-08
@@ -31,13 +31,13 @@ still int-only). One coherent PR, one clear gate.
 
 **Goal:** A single connected WS client can subscribe with `key:int`
 AND a separate WS client can subscribe with `id:"string"` to the
-same gma_v3 instance; each receives correctly-typed value frames
+same krn instance; each receives correctly-typed value frames
 (`{key:N, ...}` vs `{requestId:"...", ...}`); smoke.js stays
 green; the int-keyed unit tests still pass.
 
 **Tasks:**
 
-1. New header `include/gma/server/RequestKey.hpp` defining
+1. New header `include/krn/server/RequestKey.hpp` defining
    `using RequestKey = std::variant<int, std::string>;` plus a
    `std::hash<RequestKey>` specialization (combines the variant
    index discriminant with the alternative's standard hash so
@@ -47,7 +47,7 @@ green; the int-keyed unit tests still pass.
    string), and `std::optional<RequestKey> parseRequestKeyFromObj(
    const rapidjson::Value&)` (reads `key:int | id:int | id:string`,
    rejects a request that supplies both `key` AND `id`).
-2. Refactor `include/gma/nodes/Responder.hpp` + `src/nodes/Responder.cpp`:
+2. Refactor `include/krn/nodes/Responder.hpp` + `src/nodes/Responder.cpp`:
    - Change ctor parameter from `int key` to `RequestKey key`.
    - Field `key_` becomes `RequestKey`.
    - `send_` typedef changes to
@@ -57,7 +57,7 @@ green; the int-keyed unit tests still pass.
      `tests/connection/...` (verify via
      `grep -rn 'std::make_shared<krn::nodes::Responder>'`); update
      fixture to pass a `RequestKey{1}` literal.
-3. Refactor `include/gma/server/ClientSession.hpp:77-78`:
+3. Refactor `include/krn/server/ClientSession.hpp:77-78`:
    `unordered_map<int, ...> active_` and
    `unordered_map<int, vector<INode>> chains_` →
    `unordered_map<RequestKey, ...>` (using the new hash). Include
@@ -90,9 +90,9 @@ green; the int-keyed unit tests still pass.
    - Build `std::vector<RequestKey>` from whichever is present.
    - The `active_.find(key)` and `chains_.erase(key)` lines work
      against the variant-keyed map unchanged.
-8. Build verification: `cmake --build build -t gma_server -j$(nproc)`
-   completes clean. `cmake --build build -t gma_tests -j$(nproc)`
-   completes clean. Run the existing `gma_tests` binary —
+8. Build verification: `cmake --build build -t krn_server -j$(nproc)`
+   completes clean. `cmake --build build -t krn_tests -j$(nproc)`
+   completes clean. Run the existing `krn_tests` binary —
    ALL pre-existing tests pass (regression gate for the variant
    ripple).
 
@@ -102,7 +102,7 @@ visibility that surfaced the bug — useful but not required. No
 hard dependencies.
 
 **Verification:**
-- `ctest --output-on-failure` (or `gma_tests` binary) passes —
+- `ctest --output-on-failure` (or `krn_tests` binary) passes —
   all pre-existing tests including the int-keyed
   `tests/ws/ClientSessionTest.cpp` cases stay green.
 - `node tools/smoke-test/smoke.js --url ws://localhost:4000
@@ -146,7 +146,7 @@ hard dependencies.
   verification uses a separate string-keyed payload that doesn't
   share state with smoke.js's int-keyed flow.
 
-**Rollback:** Revert the GMA_V3 PR. Phase 1 is one PR; reverting
+**Rollback:** Revert the krn PR. Phase 1 is one PR; reverting
 restores the int-only behavior. No persistence layer affected; no
 schema migration to reverse. Embassy's saved-scene path returns to
 silently-dropping per the pre-fix state.
@@ -157,7 +157,7 @@ silently-dropping per the pre-fix state.
 
 **Goal:** New named tests cover the string-key path; the
 embassy-saved-scene-dispatch proposal's `tools/saved-scene-smoke.sh`
-runs to completion against a gma_v3 build that includes phase 1; the
+runs to completion against a krn build that includes phase 1; the
 hot-path benchmark stays within 2% of baseline; the protocol's new
 shape is documented.
 
@@ -185,18 +185,18 @@ shape is documented.
    specialization. Three cases: `int(5)` and `string("5")` hash
    differently; same-int / same-string hash equal; both can
    coexist as map keys without overwriting each other.
-3. Run `gma_v3` as the existing dev compose service against the
+3. Run `krn` as the existing dev compose service against the
    `embassy-saved-scene-dispatch` proposal's
    `tools/saved-scene-smoke.sh` (which the embassy proposal's
    phase 3 still needs to ship — this task waits on that script's
    existence). Expect: 7 NEXO subscribes log `ws.subscribe` on
-   gma; embassy's data-plane WS receives binary frames within
+   krn; embassy's data-plane WS receives binary frames within
    5s. **If the script doesn't exist yet:** stand up a manual
    smoke equivalent (a bash one-liner that triggers the GET
    `/api/sessions/<candle-id>` and tails `dev_gma_v3_1`'s log)
    and capture its result in this PR's body.
 4. Run the existing `tests/dispatch/...` benchmark
-   (or `mage Bench` equivalent if it exists for gma_v3) against
+   (or `mage Bench` equivalent if it exists for krn) against
    this PR's branch and main. Assert the per-update path's
    p99 / records-per-sec stays within 2% of main's baseline.
    Capture the numbers in the PR body.
@@ -205,7 +205,7 @@ shape is documented.
    `id:int` (legacy fallback), or `id:"string"`. Outbound value /
    ack frames mirror the type via `key:int` or
    `requestId:"string"`.
-6. Update `gma_v3/CLAUDE.md`'s "Code Conventions" section with a
+6. Update `krn/CLAUDE.md`'s "Code Conventions" section with a
    one-line addition: subscribe / cancel / value-emit code paths
    use `RequestKey = std::variant<int, std::string>`; engine
    internals (Dispatcher, AtomicStore, TreeBuilder, Listener)
@@ -218,7 +218,7 @@ shape is documented.
    --output-on-failure` runs all 4 new tests (3 in ClientSessionTest
    + 1 in RequestKeyHash) and passes.
 - The cross-proposal smoke (or its manual equivalent in task 3)
-  shows 7 NEXO `ws.subscribe` lines on gma + binary frames
+  shows 7 NEXO `ws.subscribe` lines on krn + binary frames
   flowing to the browser data WS.
 - The benchmark numbers in the PR body show ≤2% delta from
   main's baseline on per-update path.
@@ -268,7 +268,7 @@ the path is to revert phase 1 (above), not phase 2.
   a tiny separate task in phase 1) so the operator-grep story
   matches the wire.
 - **Docs:** Phase 2 task 5 hits `docs/atomic-keys.md`; task 6
-  hits `gma_v3/CLAUDE.md`. No external readme changes.
+  hits `krn/CLAUDE.md`. No external readme changes.
 - **Linear:** create a project for this proposal at /linear sync
   time. ~10 task issues + 7 ACs. Cross-references the
   embassy-saved-scene-dispatch project's phase 2 (which becomes
@@ -283,7 +283,7 @@ the path is to revert phase 1 (above), not phase 2.
   "5", not the integer 5. POLA. Documented in spec non-goals.
 - **Mixed cancel payload.** `keys` and `ids` in the same cancel
   message is an explicit error. Documented in spec non-goals.
-- **New gma node kinds.** Out of scope.
+- **New krn node kinds.** Out of scope.
 - **Treaty / proto schema changes.** Embassy's wire shape is
   already string-id-compatible upstream of this proposal.
 - **Saved-scene end-to-end smoke as part of THIS proposal's

@@ -1,4 +1,4 @@
-# GMA_V3 Data Layer — L1 ClickHouse, gma as the only compute
+# KRN Data Layer — L1 ClickHouse, krn as the only compute
 
 **Design reference:** [`docs/data-layer.md`](../../docs/data-layer.md) (revision 3).
 **Origin ticket:** ENC-1478. **Date:** 2026-10-14.
@@ -9,40 +9,40 @@
 
 Raw Databento **trades + mbo** (L3 per-order), **one symbol, seven days**, lands in a
 single-node self-hosted ClickHouse **L1** store. No derived layers. ClickHouse is indexed
-columnar **storage and selection only**; gma performs **100% of the computation** through
+columnar **storage and selection only**; krn performs **100% of the computation** through
 one implementation of every operator, shared by live, replay, chart fill and headless
-research. A **shim** derives the minimal lossless `SELECT` from a gma manifest and streams
-column blocks into gma with no row materialization.
+research. A **shim** derives the minimal lossless `SELECT` from a krn manifest and streams
+column blocks into krn with no row materialization.
 
-The first deliverable is a **measurement**, not a feature: whether gma can consume rows as
+The first deliverable is a **measurement**, not a feature: whether krn can consume rows as
 fast as ClickHouse delivers them (`B2 ≥ B1`). Everything else is sized by that number.
 
 ---
 
 ## 1. Why
 
-gma today has no history, no persistence and no replay. Three separate needs converge on
+krn today has no history, no persistence and no replay. Three separate needs converge on
 one layer:
 
 1. **Replay / backtest** — run a graph over a past window.
 2. **Chart fill** — a DynaCharting view attaches and needs historical bars; no such path
    exists today (`customer-layer/src/api/history.ts` is pipeline-build history, not market
    data).
-3. **Headless research** — gma as a query engine transforming tables for research
+3. **Headless research** — krn as a query engine transforming tables for research
    processes, outside DynaCharting entirely.
 
 And the provider is changing: off DTN IQFeed onto Databento, with Databento Plus (live
 TotalView) out of budget, so historical bulk pull into our own store is the only route.
 
-The obvious design — compile a gma graph to SQL and let ClickHouse execute it — **is
+The obvious design — compile a krn graph to SQL and let ClickHouse execute it — **is
 refused**, see D1.
 
 ---
 
 ## 2. Locked decisions
 
-**D1 — ClickHouse selects, gma computes. One implementation of every operator.**
-A transpiler producing SQL for gma's math yields small numerical differences even when
+**D1 — ClickHouse selects, krn computes. One implementation of every operator.**
+A transpiler producing SQL for krn's math yields small numerical differences even when
 correct: float accumulation order, bucket edge inclusivity, EMA seeding, NaN/empty-bucket
 handling, timestamp tie-breaking. This system's business is reading differences of that
 size as **signal**, so a discrepancy manufactured by the storage layer is
@@ -55,11 +55,11 @@ Permitted: `WHERE` on `symbol`/`ts_event`/`provider_seq`, partition pruning, col
 projection, `ORDER BY` matching the physical PK, `LIMIT` on a raw page only. Forbidden
 without exception: aggregates, window functions, `GROUP BY`, time bucketing, any
 expression in the projection list, computed `MATERIALIZED`/`ALIAS` columns. Enforced by
-`gma_shim_sql_lint` at build time over the 272-entry request corpus — a structural
+`krn_shim_sql_lint` at build time over the 272-entry request corpus — a structural
 guarantee on query *shape*, not a numerical diff. §1.2–1.3, §5.4.
 
 **D3 — Performance comes from transport, never from semantics.**
-gma's per-value costs (a `std::string` symbol copy, a virtual call per node, a
+krn's per-value costs (a `std::string` symbol copy, a virtual call per node, a
 `ThreadPool::post` hop per non-strand node, an `AtomicStore` write under a `shared_mutex`,
 a rapidjson DOM at ingress) dominate at MBO rates. Removing them is **bit-identical by
 construction** — same functions, same order, same arithmetic. Reimplementing any operator's
@@ -88,7 +88,7 @@ local disk. If the files are ever not retained, `ReplacingMergeTree` with a prov
 
 **D7 — `symbol` is the ticker; `instrument_id` is retained; `gma.symbology` holds the
 mapping.** DBN's `instrument_id` is dataset-scoped and reassignable while charts, manifests
-and gma's `streamKey` all want `"AAPL"`. Keying L1 on `instrument_id` would make every
+and krn's `streamKey` all want `"AAPL"`. Keying L1 on `instrument_id` would make every
 query a join and the store unreadable by hand. The mapping table goes in **now, at one
 symbol, because it costs nothing now and cannot be retrofitted.** Ticker reuse after a
 delisting is detectable via `valid_from`/`valid_to` and otherwise out of scope. §8.9.
@@ -125,10 +125,10 @@ live-path precedent. The planner already derives which `kinds` a graph touches a
 **refuse** a graph reading `trades` and `book_events` for the same symbol and window.
 Reconciliation is a semantic choice masquerading as a convenience. §C13, Q15.
 
-**D13 — Measurement precedes construction.** `B1` (rows/sec ClickHouse → gma, transport
+**D13 — Measurement precedes construction.** `B1` (rows/sec ClickHouse → krn, transport
 only) and `B2` (rows/sec through the DAG) run before the shim, event time or any §6 change
 is built. Target `B2 ≥ B1`. Neither needs event time, because a raw-scan benchmark uses a
-non-windowed graph. Confound to design around: gma and ClickHouse share one machine and
+non-windowed graph. Confound to design around: krn and ClickHouse share one machine and
 compete for cores and page cache, so `B2 ≥ B1` can be satisfied for the wrong reason —
 pinned cores or a sequential protocol, and a capped `max_server_memory_usage`. §14.
 
@@ -145,12 +145,12 @@ query Parquet. §C10, §15.
 | repo | change | when |
 |---|---|---|
 | **workspace** | `tools/stack.sh up clickhouse` — rootless podman, single node, memory-capped | first slice (T1) |
-| **GMA_V3** | `data/` → `gma_data` library: schema, Databento adapter, ingest, shim; `Dispatcher::onRecord`; benchmarks; later event time + `ReplaySource` + sinks | first slice + post-measurement |
+| **krn** | `data/` → `krn_data` library: schema, Databento adapter, ingest, shim; `Dispatcher::onRecord`; benchmarks; later event time + `ReplaySource` + sinks | first slice + post-measurement |
 | **embassy** | seed `baseMs` from the fill window; pre-size `createBuffer` | deferred (chart fill) |
 | **treaty** | wire change if Q1 resolves toward a second time basis | deferred |
 | **customer-layer** | chart-fill request surface | deferred |
 
-Dependency direction is unchanged: `gma_data` depends on `gma_engine`; `gma_engine` depends
+Dependency direction is unchanged: `krn_data` depends on `krn_engine`; `krn_engine` depends
 on neither it nor any connector. **Arrow and the ClickHouse client must never become engine
 dependencies.**
 
@@ -159,7 +159,7 @@ dependencies.**
 ## 4. Non-goals
 
 - Any derived layer, rollup, bar table or feature store (D4).
-- Transpiling gma graphs to SQL, in any form (D1).
+- Transpiling krn graphs to SQL, in any form (D1).
 - Vectorized or columnar re-implementation of any operator (D3).
 - `SplicedSource`'s live half — nothing exercises it until Databento live exists.
 - Live TotalView / Databento Plus.
@@ -203,7 +203,7 @@ fixed metadata block and one variable-length symbology section.
 a DBN v4 lands on us rather than on a vendor bump — and metadata/symbology is exactly where a
 hand-rolled decoder goes wrong. Three mitigations, all in the build rather than in a comment:
 the framing is **measured** against real vendor bytes committed at
-`GMA_V3/data/tests/fixtures/dbn/` and cross-checked against `databento-cpp`'s own decoder-test
+`krn/data/tests/fixtures/dbn/` and cross-checked against `databento-cpp`'s own decoder-test
 expectations; an unknown DBN version is **refused**, never guessed; and every declared
 `Action` / `Side` / `RType` enumerator is asserted to be *accepted* as well as every
 undeclared byte *refused*. **Two independent adversarial sweeps**, one by the implementer and
@@ -214,7 +214,7 @@ an `Update` row — plus a bound asserted by its counter rather than its invaria
 fields no test could reach, one unreachable branch, and two comments describing mechanisms
 that do not exist. All fixed; the bug's test was written red first. Every one of those
 mutations is now caught. Also deliberately **not** in
-`gma_data`: zstd. `.dbn.zst` is decompressed by ENC-1483's ingest job, and feeding a zstd
+`krn_data`: zstd. `.dbn.zst` is decompressed by ENC-1483's ingest job, and feeding a zstd
 frame to the adapter is refused by name.
 
 **Facts T4 settled by measurement, which §8.9 of the design doc had flagged as "from
@@ -227,7 +227,7 @@ memory":**
   ts_in_delta, sequence}` (48 bytes) — note `action`/`side` sit *before* `flags` here and
   *after* it in `MboMsg`. `Action` is `A C M T F R N`; `Side` is `A B N`; prices are `int64`
   at 1e-9 with `kUndefPrice = INT64_MAX`. The names in
-  `data/include/gma/data/DatabentoAdapter.hpp`'s `dbn` namespace are the vendor's own
+  `data/include/krn/data/DatabentoAdapter.hpp`'s `dbn` namespace are the vendor's own
   spellings.
 - **Metadata framing.** `"DBN"` + a version byte + a `uint32` length, then a **100-byte**
   fixed block in every version (v1 spends 8 of it on a `record_count` and 47 on reserved; v2+
@@ -262,7 +262,7 @@ pulled** — `XNAS.ITCH`, `MSFT`, `mbo` + `trades`, requested `2022-06-10 12:30:
 UTC`, `limit: 1000`, CSV with `pretty_px: false` / `pretty_ts: false`. The files live at
 `~/market-data/databento/XNAS.ITCH/MSFT/20220610/`, **outside every git working tree**,
 because §14.2 names committing Databento data a redistribution question not worth answering.
-Driven by `gma_ingest`, which transcodes CSV → the vendor's own PODs → **real DBN** via the
+Driven by `krn_ingest`, which transcodes CSV → the vendor's own PODs → **real DBN** via the
 byte-for-byte-verified `DbnEncoder`, retains the `.dbn` beside the CSVs (D6), and decodes it
 back through ENC-1482's adapter. One mapping to canonical form exists and it is the adapter's
 (D1).
@@ -387,10 +387,10 @@ job** — it writes a `state=3`/`state=0` row first. A `DROP PARTITION` typed at
 hand bypasses that entirely, and when it was, `isComplete` for the in-window request returned
 **COMPLETE over an empty table**, with every coverage probe still green because the rule was
 behaving correctly over a table that had been lied to. There is no foreign key and no trigger
-that can prevent it. `gma_ingest verify` now carries the one sound counter-check — **a count
+that can prevent it. `krn_ingest verify` now carries the one sound counter-check — **a count
 cannot *establish* completeness (D11), but it can *refute* a claim**: a `state=1` window
 claiming `rows_inserted > 0` whose range holds **zero** rows is not quiet, it is a lie. That
-check was observed red on exactly that condition and green after `gma_ingest reload`.
+check was observed red on exactly that condition and green after `krn_ingest reload`.
 
 **One gap T4 found in ENC-1481's schema, reported rather than patched around:**
 `BookRecord::side` is two-valued (`Bid`/`Ask`) and `gma.book_events.side` is its `UInt8`, but
@@ -430,13 +430,13 @@ The 21-ticket plan in revision 2 of the design doc is the **post-measurement** p
 | # | id | title | repo | est | deps |
 |---|---|---|---|---|---|
 | T1 | ENC-1479 | `[workspace] tools/stack.sh up clickhouse` — rootless podman single-node L1 | workspace | 3 | — |
-| T2 | ENC-1480 | `[GMA_V3] L1 DDL` — trades, book_events, book_snapshots, symbology, ingest_windows, gaps | GMA_V3 | 3 | T1 |
-| T3 | ENC-1481 | `[GMA_V3] gma_data skeleton` + canonical Schema.hpp + CMake target | GMA_V3 | 4 | — |
-| T4 | ENC-1482 | `[GMA_V3] Databento DBN adapter` — trades + mbo → canonical batches | GMA_V3 | 5 | T3 |
-| T5 | ENC-1483 | `[GMA_V3] ingest job` — 7d/1symbol → L1, retain DBN, completeness rows | GMA_V3 | 4 | T2, T4 |
-| T6 | ENC-1484 | `[GMA_V3] measure book_events sort-key uniqueness` against real MBO | GMA_V3 | 2 | T5 |
-| T7 | ENC-1485 | `[GMA_V3] B1 benchmark` — ClickHouse → gma transport, native vs HTTP | GMA_V3 | 4 | T5 |
-| T8 | ENC-1486 | `[GMA_V3] Dispatcher::onRecord` — non-JSON ingress | GMA_V3 | 4 | T3 |
-| T9 | ENC-1487 | `[GMA_V3] B2 benchmark` — rows/sec through the DAG | GMA_V3 | 5 | T7, T8 |
+| T2 | ENC-1480 | `[krn] L1 DDL` — trades, book_events, book_snapshots, symbology, ingest_windows, gaps | krn | 3 | T1 |
+| T3 | ENC-1481 | `[krn] krn_data skeleton` + canonical Schema.hpp + CMake target | krn | 4 | — |
+| T4 | ENC-1482 | `[krn] Databento DBN adapter` — trades + mbo → canonical batches | krn | 5 | T3 |
+| T5 | ENC-1483 | `[krn] ingest job` — 7d/1symbol → L1, retain DBN, completeness rows | krn | 4 | T2, T4 |
+| T6 | ENC-1484 | `[krn] measure book_events sort-key uniqueness` against real MBO | krn | 2 | T5 |
+| T7 | ENC-1485 | `[krn] B1 benchmark` — ClickHouse → krn transport, native vs HTTP | krn | 4 | T5 |
+| T8 | ENC-1486 | `[krn] Dispatcher::onRecord` — non-JSON ingress | krn | 4 | T3 |
+| T9 | ENC-1487 | `[krn] B2 benchmark` — rows/sec through the DAG | krn | 5 | T7, T8 |
 
 Critical path: T1 → T2 → T5 → T7 → T9. T3/T8 and T1/T2 parallelise.
