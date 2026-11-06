@@ -7,7 +7,7 @@
 ## Overview
 
 Three phases, sliced by which repo owns the work and what's runnable
-independently. Phase 1 lands the engine-level enforcement in GMA_V3
+independently. Phase 1 lands the engine-level enforcement in krn
 (Listener factory + TreeBuilder surfacing + docs); it's
 self-contained and shippable because no live caller depends on
 Listener-on-`ob.*` working today (it never did — that's the bug).
@@ -22,7 +22,7 @@ reshape references is already merged.
 
 ---
 
-## Phase 1: gma_v3 — push-vs-pull asymmetry made loud
+## Phase 1: krn — push-vs-pull asymmetry made loud
 
 **Goal:** A Listener bound to an `ob.*` field fails to construct,
 with a clear error pointing at `docs/atomic-keys.md`; the failure
@@ -31,7 +31,7 @@ names the canonical pattern.
 
 **Tasks:**
 
-1. **`include/gma/nodes/Listener.hpp`** — add a static factory
+1. **`include/krn/nodes/Listener.hpp`** — add a static factory
    `Listener::Create(symbol, field, downstream, pool, dispatcher)
    -> krn::Result<std::shared_ptr<Listener>>`. Inside the factory,
    reject any `field` matching `ob.*` (literal prefix check; first
@@ -88,20 +88,20 @@ names the canonical pattern.
    (ENC-101). The construct-time reject in nodes/Listener::Create
    surfaces the rule as a subscribe-validate error.`
 
-**Dependencies:** none — self-contained in GMA_V3.
+**Dependencies:** none — self-contained in krn.
 
 **Verification:**
 
 ```bash
-cd GMA_V3 && cmake --build build -j --target gma_tests \
+cd krn && cmake --build build -j --target krn_tests \
   && (cd build && ctest --output-on-failure -R 'ListenerTest|ObListenerReject|ObSubscribeReject')
 ```
 - All three new test cases (`RejectsObNamespaceAtFactory`,
   `AcceptsBareKeyAtFactory`, `RejectsObSpread`) pass.
 - The TreeBuilder + WS reject tests pass.
 - `ctest --output-on-failure` overall green (no regressions).
-- `cmake --build build --target gma_bench &&
-  ./build/gma_bench --benchmark_filter='Hot|Pack'` reports
+- `cmake --build build --target krn_bench &&
+  ./build/krn_bench --benchmark_filter='Hot|Pack'` reports
   unchanged numbers within ±2% of the pre-change baseline (capture
   baseline in a comment in the PR body).
 
@@ -155,7 +155,7 @@ pattern; existing seed tests still pass.
    `ListenerSubscribableKey`. Export
    `isListenerSubscribable(field: string): field is ListenerSubscribableKey`
    helper that returns `!field.startsWith("ob.")`. Add a TSDoc
-   comment pointing at gma_v3's `docs/atomic-keys.md`.
+   comment pointing at krn's `docs/atomic-keys.md`.
 2. **`customer-layer/apps/web/src/types/pipeline-graph.test.ts`**
    (new file or extend the existing types tests) — add
    `expectError`-style test that asserts `{ field: "ob.spread" }`
@@ -186,7 +186,7 @@ pattern; existing seed tests still pass.
    the seed code is later edited.
 5. **`forum/db/seed/seed.go` ensureSeededPipelinesUnchanged
    (optional)**: if Phase 1 lands first and adds a runtime
-   listener-validation in gma_v3, we get a second layer of
+   listener-validation in krn, we get a second layer of
    defense. Track via SPEC's risk note; skip if redundant.
 
 **Dependencies:** Phase 1's `docs/atomic-keys.md` should be the
@@ -254,7 +254,7 @@ reproducible command in `docs/atomic-keys.md`.
 **Tasks:**
 
 1. **`apps/poc-client/`** (or wherever the existing PoC harness
-   lives — check `GMA_V3/apps/`) — assemble a request JSON with
+   lives — check `krn/apps/`) — assemble a request JSON with
    the canonical pattern from Phase 1 task 7's example. Wire it
    to the same feed-sim WS endpoint
    (`feed-sim.v3m.xyz` ITCH stream) the original PoC used. Run
@@ -263,7 +263,7 @@ reproducible command in `docs/atomic-keys.md`.
    regression" section at the bottom: the exact `apps/poc-client`
    invocation + expected output (a non-zero update count). Cite
    the original 0-updates baseline + this run's count.
-3. **(Optional) `gma_v3/CHANGELOG.md`** if one exists — add an
+3. **(Optional) `krn/CHANGELOG.md`** if one exists — add an
    entry referencing ENC-101 closure with the link to the PR.
 
 **Dependencies:** Phase 1 merged (the canonical pattern must be
@@ -273,8 +273,8 @@ live in TreeBuilder and the doc); Phase 2 can land in parallel
 **Verification:**
 
 ```bash
-cd GMA_V3 && cmake --build build -j --target gma_server poc_client \
-  && ./build/gma_server &
+cd krn && cmake --build build -j --target krn_server poc_client \
+  && ./build/krn_server &
 SERVER_PID=$!
 sleep 2
 ./build/poc_client \
@@ -302,7 +302,7 @@ kill $SERVER_PID
 - **Feed-sim availability.** `feed-sim.v3m.xyz` is an external
   dependency. Mitigation: cache a 30-second feed-sim transcript
   on disk and replay via `ItchAdapter`'s file-replay mode (the
-  existing `GMA_V3/connectors/market/src/feed/ItchAdapter.cpp`
+  existing `krn/connectors/market/src/feed/ItchAdapter.cpp`
   supports this — see ENC-99's PoC notes).
 
 **Rollback:** N/A — this phase only adds documentation and a
@@ -325,7 +325,7 @@ follow-up ticket, not a rollback of the rule itself).
   if it exists). Verify in Phase 1 task 6.
 - **Docs:** primary deliverable is the `docs/atomic-keys.md`
   rewrite (Phase 1 task 7 + Phase 3 task 2). Secondary:
-  `GMA_V3/CLAUDE.md` cross-ref (Phase 1 task 8); customer-layer
+  `krn/CLAUDE.md` cross-ref (Phase 1 task 8); customer-layer
   TSDoc comment (Phase 2 task 1); forum seed inline comment
   (Phase 2 task 3).
 

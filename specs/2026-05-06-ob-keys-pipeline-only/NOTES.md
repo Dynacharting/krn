@@ -12,7 +12,7 @@ while bare keys + TA derivations on the same connection received
 - (b) Doc-only — ob.* is pipeline-accessible, not directly Listenable.
 - (c) Add Interval-based polling protocol for ob.* fields.
 
-ENC-94's `gma_v3/docs/atomic-keys.md` (status: shipped) currently
+ENC-94's `krn/docs/atomic-keys.md` (status: shipped) currently
 presents `ob.*` as "subscribe to these for L2 sources" — exactly
 the framing ENC-101 found is wrong.
 
@@ -57,8 +57,8 @@ without expanding the protocol or the C++ hot path.
 
 Probably one phase split into two waves of touchpoints:
 
-- **Wave 1 (gma_v3):** docs + Listener/TreeBuilder reject + tests.
-  Self-contained in GMA_V3 repo; verifiable with `mage Test` /
+- **Wave 1 (krn):** docs + Listener/TreeBuilder reject + tests.
+  Self-contained in krn repo; verifiable with `mage Test` /
   the existing C++ test harness.
 - **Wave 2 (customer-layer + forum):** TS type narrowing + seed
   reshape. Depends on Wave 1's docs but not its code.
