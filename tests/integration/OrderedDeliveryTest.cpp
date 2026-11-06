@@ -1,6 +1,6 @@
 // tests/integration/OrderedDeliveryTest.cpp
 //
-// ENC-1005 — SPEC specs/2026-09-20-gma-join-correctness D3, D4.
+// ENC-1005 — SPEC specs/2026-09-20-krn-join-correctness D3, D4.
 // "Delivery is serialized per request DAG."
 //
 // `tests/treebuilder/CorpusTest.cpp`'s `Corpus86_SpreadIsExactlyTwoCents` is

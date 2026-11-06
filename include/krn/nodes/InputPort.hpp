@@ -9,7 +9,7 @@ namespace krn {
 
 // ---------------------------------------------------------------------------
 // STRUCTURAL INPUT IDENTITY FOR FAN-IN NODES
-// ENC-1291 / SPEC specs/2026-09-20-gma-join-correctness D2 (and D6).
+// ENC-1291 / SPEC specs/2026-09-20-krn-join-correctness D2 (and D6).
 // ---------------------------------------------------------------------------
 //
 // A fan-in node has to know WHICH of its declared inputs a value came from.

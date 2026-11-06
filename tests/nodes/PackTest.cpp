@@ -133,7 +133,7 @@ TEST(PackTest, PortDoesNotKeepPackAlive) {
 
 // ═══ ENC-1292 — the DECLARED correlation key ═════════════════════════════════
 //
-// SPEC specs/2026-09-20-gma-join-correctness D1, section 1.1 defect 3, Q6.
+// SPEC specs/2026-09-20-krn-join-correctness D1, section 1.1 defect 3, Q6.
 // `Pack{a:AAPL, b:MSFT}` with 6 ticks on each side emitted 0 records, forever,
 // silently — measured on the real node. It keys on `sv.symbol` exactly as
 // `Aggregate` did, so it gets exactly the same declared key.

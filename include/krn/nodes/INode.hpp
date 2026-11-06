@@ -18,7 +18,7 @@ public:
   virtual void onValue(const StreamValue& sv) = 0;
   virtual void shutdown() noexcept = 0;
 
-  // ENC-1005 / SPEC specs/2026-09-20-gma-join-correctness D3.
+  // ENC-1005 / SPEC specs/2026-09-20-krn-join-correctness D3.
   //
   // "I re-post every value onto my own SERIALIZING executor, so do not
   // interpose a queue of your own in front of me."
@@ -36,7 +36,7 @@ public:
   // that has not opted in.
   virtual bool deliversOnOwnExecutor() const noexcept { return false; }
 
-  // ENC-1335 / SPEC specs/2026-09-20-gma-join-correctness D3 — THE PULL HALF.
+  // ENC-1335 / SPEC specs/2026-09-20-krn-join-correctness D3 — THE PULL HALF.
   //
   // "My output is read from somewhere else, so WHEN I read it is part of my
   // semantics. Take my sample at the clock, not at my turn in the queue."

@@ -1,7 +1,7 @@
 // ENC-1292 — the DECLARED join key: `by` is `"streamKey"`, `"none"`, or a
 // BUILD ERROR.
 //
-// SPEC specs/2026-09-20-gma-join-correctness D1, D6, section 1.1 defect 3, and
+// SPEC specs/2026-09-20-krn-join-correctness D1, D6, section 1.1 defect 3, and
 // section 5 Q3 (RULED) / Q6.
 //
 // ─────────────────────────────────────────────────────────────────────────────

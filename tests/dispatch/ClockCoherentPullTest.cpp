@@ -1,5 +1,5 @@
 // ENC-1335 — A PULL NODE MUST SAMPLE AS OF ITS OWN CLOCK TICK.
-// SPEC specs/2026-09-20-gma-join-correctness D3/D4 §1.1; found by ENC-1290's
+// SPEC specs/2026-09-20-krn-join-correctness D3/D4 §1.1; found by ENC-1290's
 // refutation pass and reported there as "a race in the `node`-only path that
 // no gate covers".
 //

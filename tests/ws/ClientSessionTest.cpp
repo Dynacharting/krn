@@ -305,7 +305,7 @@ TEST(ClientSessionTest, SubscribeRejectsObListenerField) {
   stream.close(ws::close_code::normal, ec);
 }
 
-// ENC-1293 / SPEC specs/2026-09-20-gma-join-correctness D7: a request whose
+// ENC-1293 / SPEC specs/2026-09-20-krn-join-correctness D7: a request whose
 // terminal would receive a `Record` must round-trip as an `error` frame whose
 // `where` is "build", naming the reduction to apply.
 //

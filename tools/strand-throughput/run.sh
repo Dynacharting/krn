@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ENC-1005 — SPEC specs/2026-09-20-gma-join-correctness §5 Q2's instrument.
+# ENC-1005 — SPEC specs/2026-09-20-krn-join-correctness §5 Q2's instrument.
 #
 # Builds krn_engine and the throughput instrument into a PRIVATE mktemp -d and
 # runs the four profiles Q2 asks for. Nothing is written into the repo's own

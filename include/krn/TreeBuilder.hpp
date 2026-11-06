@@ -44,7 +44,7 @@ namespace tree {
     Dispatcher* dispatcher { nullptr };   // for Listener wiring
     BindingScope*     bindingScope { nullptr }; // active let-binding scope (ENC-647)
 
-    // ENC-1005 / SPEC specs/2026-09-20-gma-join-correctness D3, D4.
+    // ENC-1005 / SPEC specs/2026-09-20-krn-join-correctness D3, D4.
     //
     // THE REQUEST DAG's serializing executor. ONE per request — shared by every
     // Listener the request builds, which is precisely what orders the two sides
@@ -85,7 +85,7 @@ namespace tree {
     // shape, and nothing gates it.
     //
     // That is the SPEC's own descope, not an oversight:
-    // `specs/2026-09-20-gma-join-correctness/SPEC.md` §4 keeps the timer
+    // `specs/2026-09-20-krn-join-correctness/SPEC.md` §4 keeps the timer
     // conversion out of this project because it collides file-for-line with
     // ENC-1280 in the active *Timestamps on the wire* project. Note the case it
     // does NOT leave open: a PULL-only fan-in input (`AtomicAccessor` and

@@ -1,6 +1,6 @@
 // ENC-1291 — the join counts INPUTS, not values.
 //
-// SPEC specs/2026-09-20-gma-join-correctness D2, D6, section 1.1 defect 2.
+// SPEC specs/2026-09-20-krn-join-correctness D2, D6, section 1.1 defect 2.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // THIS FILE USED TO PIN THE DEFECT.
@@ -460,7 +460,7 @@ TEST(AggregateTest, OutOfRangePortIndexIsIgnored) {
 
 // ═══ 5. ENC-1292 — the DECLARED correlation key ══════════════════════════════
 //
-// SPEC specs/2026-09-20-gma-join-correctness D1, D6, section 1.1 defect 3, and
+// SPEC specs/2026-09-20-krn-join-correctness D1, D6, section 1.1 defect 3, and
 // section 5 Q3 (ruled) / Q6.
 //
 // Until ENC-1292 this node keyed its pending tuple on `sv.symbol` and nothing

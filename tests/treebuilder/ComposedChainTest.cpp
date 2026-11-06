@@ -1,7 +1,7 @@
 // ENC-1290 — `node` and `pipeline` compose into ONE chain, and the outer
 // `Listener(streamKey, field)` is that chain's CLOCK.
 //
-// SPEC specs/2026-09-20-gma-join-correctness D5 and §5 Q1 (ruled 2026-09-20 by
+// SPEC specs/2026-09-20-krn-join-correctness D5 and §5 Q1 (ruled 2026-09-20 by
 // ENC-1317; the rule's first wording was broken by that ticket's own
 // adversarial review and replaced — Corrections C4.0).
 //

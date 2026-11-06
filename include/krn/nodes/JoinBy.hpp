@@ -7,7 +7,7 @@ namespace krn {
 
 // ---------------------------------------------------------------------------
 // THE DECLARED CORRELATION KEY FOR A FAN-IN JOIN
-// ENC-1292 / SPEC specs/2026-09-20-gma-join-correctness D1, D6, section 1.1
+// ENC-1292 / SPEC specs/2026-09-20-krn-join-correctness D1, D6, section 1.1
 // defect 3, and section 5 Q3 (RULED 2026-09-20) and Q6.
 // ---------------------------------------------------------------------------
 //
@@ -158,7 +158,7 @@ inline JoinBy parseJoinBy(const std::string& raw, const char* nodeType) {
       who + "'by':\"origin\" is RESERVED and NOT IMPLEMENTED. It names a "
             "same-upstream-event join (correlate the values that descend from "
             "one source event), which SPEC "
-            "specs/2026-09-20-gma-join-correctness D2 explicitly rejected for "
+            "specs/2026-09-20-krn-join-correctness D2 explicitly rejected for "
             "this release and section 4 records as future work. The name is "
             "held so that join cannot later ship under an incompatible "
             "spelling. Use \"streamKey\" (join per symbol, the default) or "
@@ -174,7 +174,7 @@ inline JoinBy parseJoinBy(const std::string& raw, const char* nodeType) {
     "the cross-symbol join). \"origin\" is reserved and unimplemented. A "
     "value outside this set is refused rather than defaulted, because "
     "defaulting it would return a plausible wrong number with no diagnostic "
-    "(SPEC specs/2026-09-20-gma-join-correctness section 5 Q3).");
+    "(SPEC specs/2026-09-20-krn-join-correctness section 5 Q3).");
 }
 
 } // namespace krn

@@ -78,7 +78,7 @@ namespace {
 //     queued, which is the uncontended steady state, and nothing else. A fair
 //     rwlock would put a std::mutex round trip on every get().
 //   * needs no non-portable rwlock attribute and no platform #ifdef —
-//     specs/2026-09-16-gma-v3-code-review-remediation D9 wants a portable,
+//     specs/2026-09-16-krn-code-review-remediation D9 wants a portable,
 //     reproducible default build.
 //
 // What it does NOT claim: it is not a fairness guarantee. A reader that has

@@ -583,7 +583,7 @@ if (KRN_BUILD_TESTS)
   # LAST GATE, 2026-09-20.
   #
   # What stood here: `tests/treebuilder/CorpusTest.cpp`'s value assertions
-  # (SPEC specs/2026-09-20-gma-join-correctness D8) were red on `master` BY
+  # (SPEC specs/2026-09-20-krn-join-correctness D8) were red on `master` BY
   # DESIGN — an instrument that cannot fail is not a gate — so each was
   # registered as its own ctest case with `WILL_FAIL TRUE`, excluded from the
   # main `krn_tests` case by a `--gtest_filter=-...` list, and guarded by
