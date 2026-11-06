@@ -16,7 +16,7 @@ namespace krn { namespace server { class SubscriptionStrandMint; } }
 
 namespace krn::rt {
 
-// ENC-1005 / SPEC specs/2026-09-20-gma-join-correctness D3, D4.
+// ENC-1005 / SPEC specs/2026-09-20-krn-join-correctness D3, D4.
 //
 // A SERIALIZING EXECUTOR over `ThreadPool`. Tasks posted to one Strand run
 //   * one at a time, and

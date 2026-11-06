@@ -28,7 +28,7 @@
 namespace krn {
 namespace server {
 
-// ENC-1338 / ENC-1005 / SPEC specs/2026-09-20-gma-join-correctness D3, D4.
+// ENC-1338 / ENC-1005 / SPEC specs/2026-09-20-krn-join-correctness D3, D4.
 //
 // THE PRODUCTION SUBSCRIPTION-STRAND MINT. `ClientSession::handleSubscribe`
 // calls `mint()` once per subscription and puts the result in

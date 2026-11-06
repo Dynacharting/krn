@@ -114,7 +114,7 @@ TEST_F(CorpusTestFixture, AllCorpusRequestsBuild) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// ENC-1289 — real value assertions (SPEC specs/2026-09-20-gma-join-correctness
+// ENC-1289 — real value assertions (SPEC specs/2026-09-20-krn-join-correctness
 // D8, §1.2).
 //
 // Everything above this line asserts `chain.head != nullptr`. That is a build
@@ -156,7 +156,7 @@ TEST_F(CorpusTestFixture, AllCorpusRequestsBuild) {
 // drains it in order, and `Dispatcher::onTick`'s inner listener container is a
 // `std::map`, so `ask` is notified before `bid` deterministically (`"ask" <
 // "bid"`). The committed probe at
-// specs/2026-09-20-gma-join-correctness/probe/ measured 0 wrong tuples in
+// specs/2026-09-20-krn-join-correctness/probe/ measured 0 wrong tuples in
 // 1,200,000 consecutive single-threaded tuples. **A value assertion written at
 // one thread is therefore green by construction against the very defect it
 // names.**
@@ -740,7 +740,7 @@ TEST(CorpusValueAssertions, Corpus86_SpreadIsExactlyTwoCents_SingleThreadControl
   ASSERT_GT(r.tuples, 0u) << "the join emitted nothing — the control proves nothing";
   EXPECT_EQ(r.wrong, 0u)
       << "CONTROL FAILED. At threads=1 this join is correct BY CONSTRUCTION and the\n"
-         "    committed probe (specs/2026-09-20-gma-join-correctness/probe/) measured 0\n"
+         "    committed probe (specs/2026-09-20-krn-join-correctness/probe/) measured 0\n"
          "    wrong tuples in 1,200,000 consecutive single-threaded tuples. A failure\n"
          "    here means either the engine's single-threaded ordering changed or the\n"
          "    checker below is broken — investigate before trusting any verdict from\n"

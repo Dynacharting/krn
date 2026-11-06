@@ -72,7 +72,7 @@ void Listener::onValue(const krn::StreamValue& sv) {
   }
   if (!down) return;
 
-  // ENC-1005 / SPEC specs/2026-09-20-gma-join-correctness D3, D4.
+  // ENC-1005 / SPEC specs/2026-09-20-krn-join-correctness D3, D4.
   //
   // The STRAND is the whole fix. Every Listener in one request DAG shares one,
   // so the values this DAG is built to join arrive downstream in the order the

@@ -26,7 +26,7 @@ Aggregate::Aggregate(std::size_t arity,
       "Aggregate: by:\"none\" requires a non-empty output streamKey — a join "
       "that ignores the symbol has no identity of its own and must be given "
       "the request's top-level 'streamKey' (SPEC "
-      "specs/2026-09-20-gma-join-correctness section 5 Q6)");
+      "specs/2026-09-20-krn-join-correctness section 5 Q6)");
 }
 
 void Aggregate::addPort(std::shared_ptr<INode> port) {
@@ -49,7 +49,7 @@ void Aggregate::onValue(const StreamValue& sv) {
     krn::util::logger().log(krn::util::LogLevel::Warn,
       "Aggregate: value arrived on the pipeline edge, not on a declared input "
       "port, and was dropped. A fan-in node joins its own 'inputs'; it cannot "
-      "consume an upstream value (SPEC specs/2026-09-20-gma-join-correctness "
+      "consume an upstream value (SPEC specs/2026-09-20-krn-join-correctness "
       "D2). Logged once per node.",
       {{"symbol", sv.symbol}});
   }

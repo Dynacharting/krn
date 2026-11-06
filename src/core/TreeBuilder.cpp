@@ -76,7 +76,7 @@ inline bool has(const rapidjson::Value& v, const char* k) {
   return v.HasMember(k);
 }
 
-// ENC-1292 / SPEC specs/2026-09-20-gma-join-correctness D1 + section 5 Q3
+// ENC-1292 / SPEC specs/2026-09-20-krn-join-correctness D1 + section 5 Q3
 // (RULED) and Q6 — READ THE DECLARED JOIN KEY OF A FAN-IN NODE.
 //
 // Deliberately NOT written as `strOr(v, "by", "streamKey")`, which is the shape
@@ -120,7 +120,7 @@ inline krn::JoinBy joinByFor(const rapidjson::Value& v,
       std::string(nodeType) + ": 'by' is declared more than once. A repeated "
       "key is refused rather than resolved by position — whichever copy the "
       "parser happened to return would decide the join's correlation key "
-      "silently (SPEC specs/2026-09-20-gma-join-correctness section 5 Q3).");
+      "silently (SPEC specs/2026-09-20-krn-join-correctness section 5 Q3).");
 
   if (!v["by"].IsString())
     throw std::runtime_error(
@@ -137,7 +137,7 @@ inline krn::JoinBy joinByFor(const rapidjson::Value& v,
       "top-level 'streamKey' — but none is in scope here. Build this node "
       "through buildForRequest (which requires a non-empty 'streamKey'), or "
       "use the default by:\"streamKey\" (SPEC "
-      "specs/2026-09-20-gma-join-correctness section 5 Q6).");
+      "specs/2026-09-20-krn-join-correctness section 5 Q6).");
 
   return by;
 }
@@ -147,7 +147,7 @@ inline krn::JoinBy joinByFor(const rapidjson::Value& v,
 //
 // ---------- ENC-1293: Record-valued terminal rejection ----------
 //
-// SPEC specs/2026-09-20-gma-join-correctness D7.
+// SPEC specs/2026-09-20-krn-join-correctness D7.
 //
 // **THIS RESTRICTION IS DELIBERATELY TEMPORARY. ENC-1295 (embassy) lifts it.**
 // Delete this whole block, its call site in `buildForRequest`, and
@@ -327,7 +327,7 @@ std::string recordTerminalMessage(const std::string& culprit) {
          " terminal: the canonical shapes are Pack -> Expr -> Responder and"
          " Pack -> Field -> Responder. This restriction is TEMPORARY (ENC-1293) and"
          " is lifted by ENC-1295 once embassy consumes a Record; see"
-         " specs/2026-09-20-gma-join-correctness/SPEC.md D7.";
+         " specs/2026-09-20-krn-join-correctness/SPEC.md D7.";
 }
 
 } // namespace
@@ -335,7 +335,7 @@ std::string recordTerminalMessage(const std::string& culprit) {
 //
 // ---------- ENC-1336: a fan-in as a pipeline stage with something upstream ----------
 //
-// SPEC specs/2026-09-20-gma-join-correctness/SPEC.md §5 Q7 (ruled 2026-09-20 by
+// SPEC specs/2026-09-20-krn-join-correctness/SPEC.md §5 Q7 (ruled 2026-09-20 by
 // ENC-1334), D5 as amended by that ruling.
 //
 // WHY IT EXISTS. Under D5 the chain is
@@ -768,7 +768,7 @@ std::string fanInPipelineStageMessage(const FanInPlacement& f,
            " upstream instead of refusing was considered and rejected: the"
            " binding's own fan-out already delivers to this downstream, so"
            " forwarding would DOUBLE-DELIVER and nothing decides which value is"
-           " meant. See specs/2026-09-20-gma-join-correctness/SPEC.md section 5"
+           " meant. See specs/2026-09-20-krn-join-correctness/SPEC.md section 5"
            " Q7; found by ENC-1344's builder enumeration, filed as ENC-1398." +
            nested;
   }
@@ -798,7 +798,7 @@ std::string fanInPipelineStageMessage(const FanInPlacement& f,
          " placement in the pipeline is as " + std::string(key) + "[0] of a"
          " request with NO 'node' key — there the fan-in's upstream is the head"
          " Listener itself, which is the same wiring it gets under 'node'. See"
-         " specs/2026-09-20-gma-join-correctness/SPEC.md section 5 Q7 and D5"
+         " specs/2026-09-20-krn-join-correctness/SPEC.md section 5 Q7 and D5"
          " (ENC-1336), and Corrections C13 (ENC-1344) for the nested form." +
          nested;
 }
@@ -808,7 +808,7 @@ std::string fanInPipelineStageMessage(const FanInPlacement& f,
 //
 // ---------- CompositeRoot: fan-out root for many inputs ----------
 //
-// ENC-1290 / SPEC specs/2026-09-20-gma-join-correctness D5, section 5 Q1
+// ENC-1290 / SPEC specs/2026-09-20-krn-join-correctness D5, section 5 Q1
 // (ruled 2026-09-20 by ENC-1317, then corrected by that ticket's adversarial
 // review — Corrections C4.0).
 //
@@ -1150,7 +1150,7 @@ std::shared_ptr<krn::INode> buildOne(const rapidjson::Value&      spec,
       "the only thing that correlates values. It is refused here rather than "
       "ignored, because ignoring it returns a per-symbol answer to a request "
       "asking for a cross-symbol one, with no diagnostic (SPEC "
-      "specs/2026-09-20-gma-join-correctness section 5 Q3).");
+      "specs/2026-09-20-krn-join-correctness section 5 Q3).");
 
   if (const auto* builder = krn::engine::NodeTypeRegistry::find(type)) {
     return (*builder)(v, defaultStreamKey, deps, downstream);
@@ -1224,7 +1224,7 @@ BuiltChain buildForRequest(const rapidjson::Value&      requestJson,
   if (!terminal)
     throw std::runtime_error("buildForRequest: terminal node cannot be null");
 
-  // ENC-1005 / SPEC specs/2026-09-20-gma-join-correctness D3, D4 — ONE STRAND
+  // ENC-1005 / SPEC specs/2026-09-20-krn-join-correctness D3, D4 — ONE STRAND
   // PER REQUEST DAG, MINTED HERE WHEN THE CALLER DID NOT MINT ONE.
   //
   // `ClientSession::handleSubscribe` mints one per subscription, which is what
@@ -1321,7 +1321,7 @@ BuiltChain buildForRequest(const rapidjson::Value&      requestJson,
       }
     }
   }
-  // ENC-1293 / SPEC specs/2026-09-20-gma-join-correctness D7 — TEMPORARY, and
+  // ENC-1293 / SPEC specs/2026-09-20-krn-join-correctness D7 — TEMPORARY, and
   // lifted by ENC-1295 (embassy). See the long comment on `shapeInto` above for
   // why a Record reaching the terminal is a SILENT failure in two repos.
   //
@@ -1704,7 +1704,7 @@ void registerBuiltinNodeTypes() {
           "Aggregate: 'arity' is " + std::to_string(arity) +
           " but 'inputs' declares " + std::to_string(inputCount) +
           " input(s) — they must be equal. A fan-in's inputs are addressed by "
-          "position (SPEC specs/2026-09-20-gma-join-correctness D2), so "
+          "position (SPEC specs/2026-09-20-krn-join-correctness D2), so "
           "'arity' is just the length of 'inputs' and cannot disagree with it.");
 
       // ENC-1292 / SPEC D1 — the declared correlation key. Validated with
