@@ -103,7 +103,7 @@ void ClientSession::run() {
   ws_.set_option(websocket::stream_base::decorator(
       [](websocket::response_type& res) {
         res.set(http::field::server,
-                std::string(BOOST_BEAST_VERSION_STRING) + " gma-websocket");
+                std::string(BOOST_BEAST_VERSION_STRING) + " krn-websocket");
       }));
 
   // Accept + begin read loop on strand.
