@@ -153,6 +153,26 @@ void Dispatcher::ingest(const std::string& symbol,
   // rather than introduced. Fixing it means deferring the ledger insert until
   // the first admitted field, which changes the JSON path's cap accounting and
   // therefore needs its own ticket.
+  // ENC-1627 — STORE-WRITE ELISION (B2 step 5; `util::Config::
+  // storeWriteElision`). Off: `elide` is false and every write below is the
+  // one it always was. On: this tick first seals the store's pull-read set
+  // (a no-op after the first tick), then the raw-field write and the builtin
+  // write each skip any key not in it. The set is immutable once sealed, so
+  // `readKeys` is looked up once here, without a lock, and stays valid.
+  //
+  // What elision deliberately does NOT touch, so that every declared key ends
+  // each tick holding exactly what it holds with the setting off: the
+  // raw-admission ledger below (an elided field still consumes its
+  // `maxFieldsPerSymbol` slot, so a declared field is admitted or refused
+  // exactly as before), the histories, which builtins are computed, the
+  // Listener deliveries, and `IEventComputer` writes.
+  const bool elide = _cfg.storeWriteElision && _store != nullptr;
+  const std::unordered_set<std::string>* readKeys = nullptr;
+  if (elide) {
+    _store->sealReads();
+    readKeys = _store->sealedReadFieldsFor(symbol);
+  }
+
   if (_store && fields.isObject()) {
     std::vector<std::pair<std::string, ArgType>> raw;
     {
@@ -181,20 +201,25 @@ void Dispatcher::ingest(const std::string& symbol,
           std::unordered_set<std::string>*                     admitted;
           std::vector<std::pair<std::string, ArgType>>*        out;
           std::size_t                                          cap;
+          bool                                                 elide;
+          const std::unordered_set<std::string>*               keep;
           // Explicit ctor: a class that declares a virtual override is not an
           // aggregate, so braced init of the members alone does not compile.
           Admit(std::unordered_set<std::string>* a,
                 std::vector<std::pair<std::string, ArgType>>* o,
-                std::size_t c)
-            : admitted(a), out(o), cap(c) {}
+                std::size_t c, bool e,
+                const std::unordered_set<std::string>* k)
+            : admitted(a), out(o), cap(c), elide(e), keep(k) {}
           void field(const std::string& name, double value) override {
             if (admitted->find(name) == admitted->end()) {
               if (admitted->size() >= cap) return;
               admitted->insert(name);
             }
+            // ENC-1627: elided AFTER admission, so the ledger is unchanged.
+            if (elide && !(keep && keep->contains(name))) return;
             out->emplace_back(name, ArgType{ value });
           }
-        } admit( &sit->second, &raw, _maxFieldsPerSymbol );
+        } admit( &sit->second, &raw, _maxFieldsPerSymbol, elide, readKeys );
         raw.reserve(fields.fieldCountHint());
         fields.forEachNumber(admit);
       }
@@ -300,7 +325,7 @@ void Dispatcher::ingest(const std::string& symbol,
       histVec.assign(hist.begin(), hist.end());
     }
 
-    computeAndStoreAtomics(symbol, field, histVec);
+    computeAndStoreAtomics(symbol, field, histVec, elide, readKeys);
 
     const StreamValue out{ symbol, raw };
     for (auto& node : nodes) {
@@ -371,7 +396,9 @@ void Dispatcher::notifyListeners(const std::string& symbol,
 
 void Dispatcher::computeAndStoreAtomics(const std::string& symbol,
                                               const std::string& field,
-                                              const std::vector<double>& history)
+                                              const std::vector<double>& history,
+                                              bool elide,
+                                              const std::unordered_set<std::string>* readKeys)
 {
   // ENC-1008. `field` is folded into the stored key only when
   // `atomicKeyNamespaceByField` is on; see the ATOMIC-KEY CONTRACT on the
@@ -433,12 +460,15 @@ void Dispatcher::computeAndStoreAtomics(const std::string& symbol,
       return;
     }
 
-    if (_store) {
+    // ENC-1627: with elision on, only a declared pull read is stored. The
+    // value is still computed above and still delivered below.
+    const std::string& storedKey = nsByField ? nsKey : fnName;
+    if (_store && (!elide || (readKeys && readKeys->contains(storedKey)))) {
       // The ONE line this ticket is about. Flat `<fn>` is a single slot shared
       // by every field of the symbol, so a second field driving the same
       // builtin destroys the first field's value. `<field>.<fn>` gives each
       // source field its own slot.
-      _store->set(symbol, nsByField ? nsKey : fnName, result);
+      _store->set(symbol, storedKey, result);
     }
 
     // Same routing rule as the raw-field path — see Dispatcher::deliver.

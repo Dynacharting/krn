@@ -108,6 +108,12 @@ public:
   // the delivery path reads it.
   bool inlineDagDrive() const noexcept { return _cfg.inlineDagDrive; }
 
+  // ENC-1627. `util::Config::storeWriteElision` as this Dispatcher was built
+  // with it. When true, `ingest` seals the store's pull-read set on its first
+  // tick and writes raw fields and builtin atomics only to declared keys
+  // (`AtomicStore::declareRead`).
+  bool storeWriteElision() const noexcept { return _cfg.storeWriteElision; }
+
   // Generic event ingress. Invokes every registered computer, then fans the
   // raw payload fields out to direct-field subscribers.
   //
@@ -300,9 +306,16 @@ private:
   //     and a field `synthetic` driving `sin` writes `synthetic.sin`
   //     (SyntheticConnector's). Narrow, opt-in-only, documented in
   //     krn-common's docs/atomic-keys.md.
+  //
+  // ENC-1627: `readKeys` is the symbol's sealed pull-read set when
+  // `storeWriteElision` is on (null when the symbol has none), and is ignored
+  // when `elide` is false. Only the store write consults it; the compute and
+  // the Listener delivery are unconditional, exactly as with elision off.
   void computeAndStoreAtomics(const std::string& symbol,
                               const std::string& field,
-                              const std::vector<double>& history);
+                              const std::vector<double>& history,
+                              bool elide = false,
+                              const std::unordered_set<std::string>* readKeys = nullptr);
 
 private:
   // Per-field history buffers per (symbol, field)
