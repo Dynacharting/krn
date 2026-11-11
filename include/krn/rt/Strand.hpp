@@ -23,9 +23,9 @@ namespace krn::rt {
 //   * in the order they were posted,
 // while still running on the shared pool's worker threads. It is the classic
 // "strand over an executor" construction — the same guarantee `asio::strand`
-// gives, expressed over the executor GMA actually has.
+// gives, expressed over the executor krn actually has.
 //
-// WHY NOT `asio::strand`, which D3 names. GMA's node graph does not run on an
+// WHY NOT `asio::strand`, which D3 names. krn's node graph does not run on an
 // `asio::io_context`: it runs on `krn::rt::ThreadPool` (`src/rt/ThreadPool.cpp`),
 // a hand-rolled mutex+condvar queue with no asio executor behind it. The only
 // `io_context` in the process belongs to `WebSocketServer`/`ClientSession` and
@@ -121,6 +121,26 @@ public:
   Strand(ThreadPool* pool, Attribution origin) noexcept
     : pool_(pool)
     , origin_(origin.name_ ? origin.name_ : kUnattributedOrigin) {}
+
+  // ENC-1625 — THE INLINE EXECUTOR (B2 step 3, SPEC
+  // specs/2026-10-14-krn-data-layer D3). A strand with no pool: `post` drains
+  // on the caller, in post order, exactly as the `!pool_` branch of `post`
+  // below describes. Minted for a request DAG when
+  // `util::Config::inlineDagDrive` is on, so the DAG keeps every ordering
+  // property the pooled strand gives it — one task at a time, FIFO, a task
+  // that posts back onto the strand queued behind the current one rather than
+  // run re-entrantly — and loses only the `ThreadPool::post` hop.
+  //
+  // The executor is the only thing that changes: `Listener` still answers
+  // `deliversOnOwnExecutor()` (it holds a strand), so `Dispatcher::deliver`
+  // still calls it inline, and no node reads the setting.
+  static std::shared_ptr<Strand> makeInline() {
+    return std::make_shared<Strand>(nullptr);
+  }
+
+  // True for a strand that drains on the caller (`makeInline()`, or any
+  // `Strand(nullptr)`). Diagnostic, like `origin()`.
+  bool isInline() const noexcept { return pool_ == nullptr; }
 
   Strand(const Strand&)            = delete;
   Strand& operator=(const Strand&) = delete;

@@ -235,6 +235,11 @@ Other engine keys parsed by `src/util/Config.cpp` (defaults from `Config.hpp`):
 - **Memory bounds:** `maxSymbols` (10000), `maxFieldsPerSymbol` (200).
 - **Derived-atomic key shape:** `atomicKeyNamespaceByField` (false) — see the
   atomic-key namespaces bullet under *Code Conventions*.
+- **Inline DAG drive:** `inlineDagDrive` (false) — when on, `buildForRequest` gives each
+  request DAG an inline `rt::Strand` (`Strand::makeInline()`), so the graph runs on the
+  ingress thread with no `ThreadPool::post` between nodes. Bit-identical to off under one
+  ingress thread; ingress blocks for the DAG's compute, so it is for replay and benchmarks
+  (ENC-1625, B2 step 3). Pinned by `tests/dispatch/InlineDagDriveTest.cpp`.
 - **Ingress (ENC-31, the current model):** `ingress.N.kind` plus per-entry
   sub-keys (`ingress.N.port`, `ingress.N.url`, `ingress.N.adapter`,
   `ingress.N.symbols`, …). The engine instantiates each entry by the kind a

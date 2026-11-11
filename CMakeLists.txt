@@ -483,6 +483,7 @@ if (KRN_BUILD_TESTS)
     tests/dispatch/ClockCoherentPullTest.cpp
     tests/dispatch/DispatchTest.cpp
     tests/dispatch/InjectedAtomicTest.cpp
+    tests/dispatch/InlineDagDriveTest.cpp
     tests/dispatch/ListenerMultiplicityTest.cpp
     tests/dispatch/RecordIngressEngineTest.cpp
     tests/engine/ConnectorLifecycleTest.cpp

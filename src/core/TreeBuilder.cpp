@@ -586,7 +586,7 @@ bool findFanInWithUpstream(const rapidjson::Value& spec,
   //     (`forum/internal/pipelinetranslate/config_mapping.go`) does carry
   //     `case "let"`, `case "ref"` and `case "switch"`, and `Let.body` /
   //     `Switch.cases` are passed through by `requireRaw` **unvalidated**, so
-  //     the whole node vocabulary reaches GMA through them — `Chain` included,
+  //     the whole node vocabulary reaches krn through them — `Chain` included,
   //     despite there being no `case "chain"`. The absence of a case label is
   //     not the absence of a path.
   //
@@ -1238,9 +1238,19 @@ BuiltChain buildForRequest(const rapidjson::Value&      requestJson,
   //
   // Not minted when there is no pool: with no executor there is nothing to
   // serialise, delivery is already inline and already in order.
+  //
+  // ENC-1625: with `inlineDagDrive` on, the strand minted here is the INLINE
+  // executor instead, so the DAG runs on the ingress thread with no pool hop
+  // between nodes. A caller-supplied strand is still honoured as-is; the one
+  // production caller, `ClientSession::handleSubscribe`, leaves the mint to
+  // this line when the setting is on.
   Deps depsWithStrand = depsIn;
-  if (!depsWithStrand.strand && depsWithStrand.pool)
-    depsWithStrand.strand = std::make_shared<krn::rt::Strand>(depsWithStrand.pool);
+  if (!depsWithStrand.strand) {
+    if (depsWithStrand.dispatcher && depsWithStrand.dispatcher->inlineDagDrive())
+      depsWithStrand.strand = krn::rt::Strand::makeInline();
+    else if (depsWithStrand.pool)
+      depsWithStrand.strand = std::make_shared<krn::rt::Strand>(depsWithStrand.pool);
+  }
   const Deps& deps = depsWithStrand;   // everything below builds against this
 
   // ENC-1336 / SPEC §5 Q7, D5 as amended — A FAN-IN IS NOT A PIPELINE STAGE

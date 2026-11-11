@@ -780,7 +780,12 @@ void ClientSession::handleSubscribe(const ::rapidjson::Document& doc) {
     // INLINING a mint here does not compile, because `rt::Strand::Attribution`
     // has a private constructor and `SubscriptionStrandMint` is its only
     // friend. Before ENC-1338 neither mutation reddened a single test.
-    deps.strand = krn::server::SubscriptionStrandMint::mint(deps.pool);
+    //
+    // ENC-1625: with `inlineDagDrive` on, the session mints nothing and
+    // `buildForRequest` mints the inline executor (unattributed — the
+    // attribution capability is for the pooled per-subscription strand).
+    if (!dispatcher_->inlineDagDrive())
+      deps.strand = krn::server::SubscriptionStrandMint::mint(deps.pool);
 
     try {
       // Check subscription limit BEFORE building the pipeline to avoid
@@ -834,7 +839,7 @@ void ClientSession::handleSubscribe(const ::rapidjson::Document& doc) {
 
       // Log structured field uses "key" or "requestId" mirroring the
       // wire so operators grepping forum's instruction_id can hop
-      // straight into gma's view.
+      // straight into krn's view.
       krn::util::logger().log(krn::util::LogLevel::Info,
                               "ws.subscribe",
                               { {krn::server::isInt(key) ? "key" : "requestId",

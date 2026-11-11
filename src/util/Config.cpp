@@ -93,6 +93,7 @@ bool Config::loadFromFile(const std::string& path) {
     else if (key == "maxSymbols") { int v = std::atoi(val.c_str()); if (v > 0) maxSymbols = v; }
     else if (key == "maxFieldsPerSymbol") { int v = std::atoi(val.c_str()); if (v > 0) maxFieldsPerSymbol = v; }
     else if (key == "atomicKeyNamespaceByField") { atomicKeyNamespaceByField = (val == "true" || val == "1" || val == "yes"); }
+    else if (key == "inlineDagDrive") { inlineDagDrive = (val == "true" || val == "1" || val == "yes"); }
     // Canonical ingress entries: ingress.N.kind = ..., ingress.N.<param> = ...
     else if (key.size() > 8 && key.substr(0, 8) == "ingress.") {
       auto dot2 = key.find('.', 8);
