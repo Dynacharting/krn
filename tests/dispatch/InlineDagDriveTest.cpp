@@ -175,7 +175,7 @@ Event jsonEvent(const Tick& t) {
 
 enum class Ingress { OnTick, OnRecord };
 
-struct Run {
+struct Outcome {
   std::vector<std::string>                   bytes;    // per request
   std::vector<std::size_t>                   counts;
   std::string                                store;
@@ -185,7 +185,7 @@ struct Run {
   std::size_t                                inlineStrands = 0;
 };
 
-Run drive(bool inlineDrive, Ingress ingress, const std::vector<Tick>& in) {
+Outcome drive(bool inlineDrive, Ingress ingress, const std::vector<Tick>& in) {
   util::Config cfg;
   cfg.inlineDagDrive = inlineDrive;
   auto pool = std::make_shared<rt::ThreadPool>(kPoolThreads);
@@ -210,7 +210,7 @@ Run drive(bool inlineDrive, Ingress ingress, const std::vector<Tick>& in) {
     sinks.push_back(sink);
   }
 
-  Run r;
+  Outcome r;
   for (const char* f : {"ask", "bid", "size", "mean", "stddev"}) {
     for (const auto& n : disp.listenersFor(kSym, f)) {
       auto l = std::dynamic_pointer_cast<nodes::Listener>(n);
@@ -255,7 +255,7 @@ Run drive(bool inlineDrive, Ingress ingress, const std::vector<Tick>& in) {
 }
 
 // Empty when identical; otherwise names the first differing terminal.
-std::string diff(const Run& a, const Run& b) {
+std::string diff(const Outcome& a, const Outcome& b) {
   for (std::size_t q = 0; q < a.bytes.size(); ++q) {
     if (a.bytes[q] != b.bytes[q])
       return "request " + std::to_string(q) + ": " + std::to_string(a.counts[q]) + " vs " +
@@ -265,7 +265,7 @@ std::string diff(const Run& a, const Run& b) {
   return {};
 }
 
-void expectNonVacuous(const Run& r) {
+void expectNonVacuous(const Outcome& r) {
   for (std::size_t q = 0; q < r.counts.size(); ++q)
     ASSERT_GT(r.counts[q], 0u) << "request " << q << " delivered nothing; comparison vacuous";
   ASSERT_FALSE(r.store.empty());
@@ -296,8 +296,8 @@ TEST(InlineDagDrive, OffByDefaultAndParsedLikeTheOtherEngineFlags) {
 // ---- 2 --------------------------------------------------------------------
 TEST(InlineDagDrive, TheSettingSelectsTheExecutorAndNothingElseReadsIt) {
   const auto in = ticks();
-  const Run pooled = drive(false, Ingress::OnRecord, in);
-  const Run inl    = drive(true,  Ingress::OnRecord, in);
+  const Outcome pooled = drive(false, Ingress::OnRecord, in);
+  const Outcome inl    = drive(true,  Ingress::OnRecord, in);
   expectNonVacuous(pooled);
   expectNonVacuous(inl);
 
@@ -318,12 +318,12 @@ class InlineDagDriveParity : public ::testing::TestWithParam<Ingress> {};
 
 TEST_P(InlineDagDriveParity, IdenticalDeliveriesInIdenticalOrderToThePoolPath) {
   const auto in = ticks();
-  const Run pooled = drive(false, GetParam(), in);
+  const Outcome pooled = drive(false, GetParam(), in);
   expectNonVacuous(pooled);
   // The pool path is the reference; repeat the inline run so a nondeterminism
   // in either would have more than one chance to show.
   for (int rep = 0; rep < 3; ++rep) {
-    const Run inl = drive(true, GetParam(), in);
+    const Outcome inl = drive(true, GetParam(), in);
     ASSERT_EQ(inl.onCaller, inl.deliveries) << "inline mode not in force";
     EXPECT_EQ(diff(pooled, inl), "") << "rep " << rep;
   }
@@ -343,7 +343,7 @@ INSTANTIATE_TEST_SUITE_P(BothIngressPaths, InlineDagDriveParity,
 TEST(InlineDagDrive, TheComparisonCanFail) {
   const auto in = ticks();
   for (Ingress ing : {Ingress::OnTick, Ingress::OnRecord}) {
-    const Run pooled = drive(false, ing, in);
+    const Outcome pooled = drive(false, ing, in);
     expectNonVacuous(pooled);
 
     // One ULP on one tick's ask.
