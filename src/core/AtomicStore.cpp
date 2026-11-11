@@ -227,4 +227,40 @@ AtomicStore::snapshot() const {
   return out;
 }
 
+// ENC-1627. See the header: the pull-read set and its seal.
+bool AtomicStore::declareRead(const std::string& streamKey, const std::string& field) {
+  std::lock_guard<std::mutex> lk(_readsMutex);
+  auto it = _reads.find(streamKey);
+  if (it != _reads.end() && it->second.contains(field)) return true;
+  if (_readsSealed.load(std::memory_order_relaxed)) return false;  // refused
+  _reads[streamKey].insert(field);
+  return true;
+}
+
+void AtomicStore::sealReads() {
+  if (readsSealed()) return;
+  std::lock_guard<std::mutex> lk(_readsMutex);
+  // Release under the mutex: every insert made before this point
+  // happens-before any reader that observes the flag with acquire.
+  _readsSealed.store(true, std::memory_order_release);
+}
+
+const std::unordered_set<std::string>*
+AtomicStore::sealedReadFieldsFor(const std::string& streamKey) const {
+  if (!readsSealed()) return nullptr;
+  auto it = _reads.find(streamKey);
+  return it == _reads.end() ? nullptr : &it->second;
+}
+
+std::vector<std::pair<std::string, std::string>> AtomicStore::readKeys() const {
+  std::vector<std::pair<std::string, std::string>> out;
+  {
+    std::lock_guard<std::mutex> lk(_readsMutex);
+    for (const auto& [k, fields] : _reads)
+      for (const auto& f : fields) out.emplace_back(k, f);
+  }
+  std::sort(out.begin(), out.end());
+  return out;
+}
+
 } // namespace krn

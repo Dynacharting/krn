@@ -1,6 +1,7 @@
 #include "krn/nodes/AtomicAccessor.hpp"
 #include "krn/atomic/AtomicProviderRegistry.hpp"
 
+#include <stdexcept>
 #include <utility>
 
 namespace krn {
@@ -13,7 +14,21 @@ AtomicAccessor::AtomicAccessor(std::string symbol,
   , field_(std::move(field))
   , store_(store)
   , downstream_(std::move(downstream))
-{}
+{
+  // ENC-1627. Declare this pull read to the store, so a Dispatcher with
+  // `util::Config::storeWriteElision` on keeps writing the key. Refused only
+  // when the store's read set is sealed (an eliding Dispatcher has started
+  // ingesting) and nobody declared this key before that: the node would
+  // otherwise read a key elision has never written. Thrown from here so every
+  // builder refuses the same way; `tree::buildForRequest` unwinds the partial
+  // build. With the setting off the set is never sealed and this cannot throw.
+  if (store_ && !store_->declareRead(symbol_, field_)) {
+    throw std::runtime_error(
+        "AtomicAccessor: (" + symbol_ + ", " + field_ + ") is not a declared pull read and "
+        "storeWriteElision has sealed the store's read set; with elision on, every pull "
+        "read must be built before the first tick");
+  }
+}
 
 // ENC-1335 / SPEC specs/2026-09-20-krn-join-correctness D3 (the pull half).
 //

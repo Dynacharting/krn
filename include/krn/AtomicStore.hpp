@@ -9,7 +9,10 @@
 #include <shared_mutex>
 #include <algorithm>
 #include <optional>
+#include <mutex>
 #include <tuple>
+#include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace krn {
@@ -61,6 +64,65 @@ public:
   /// insertion history.
   std::vector<std::tuple<std::string, std::string, ArgType>> snapshot() const;
 
+  // ── ENC-1627: THE PULL-READ SET (B2 step 5, store-write elision) ──────────
+  //
+  // Design: specs/2026-10-14-krn-data-layer/SPEC.md D3. The setting that uses
+  // it is `util::Config::storeWriteElision`; read that first.
+  //
+  // Which `(streamKey, field)` keys something reads back out of this store.
+  // `AtomicAccessor` declares its key in its constructor, so every pull node
+  // is in the set from the moment it is built, whichever builder built it.
+  // A Dispatcher with `storeWriteElision` on writes raw fields and builtin
+  // atomics only to declared keys. With the setting off nothing consults the
+  // set: it is recorded and exposed, and changes no write.
+  //
+  // WHY IT LIVES ON THE STORE AND NOT ON THE DISPATCHER. An `AtomicAccessor`
+  // holds a store pointer, not a Dispatcher, and can be built with no
+  // Dispatcher in its `tree::Deps` at all. Keeping the set beside the data it
+  // describes means no pull node can read this store without being in it.
+  //
+  // THE SET ONLY GROWS. Tearing a request down does not undeclare its key.
+  // Undeclaring would stop the key being written while its last value stayed
+  // in the store, so a later pull read on it would sample a stale value — the
+  // one failure elision must never cause. Keeping it costs that key's write
+  // per tick, which is exactly what the setting-off engine pays for it.
+  //
+  // THE SEAL. `sealReads()` closes the set; the eliding Dispatcher calls it at
+  // the start of its first tick, before it writes anything. After the seal a
+  // key already in the set is still accepted (it has been written on every
+  // tick since the seal, so it is current), and a NEW key is refused:
+  // `declareRead` returns false and `AtomicAccessor`'s constructor throws, so
+  // the build fails rather than producing a pull node that would read a
+  // missing value it would have had with elision off. Refusal was chosen over
+  // backfill because backfill cannot be exact: an elided raw field's value was
+  // never kept anywhere, and a flat-namespace builtin key's value depends on
+  // which field last wrote it. A sealed set is also immutable, which is what
+  // lets the per-tick lookups below run without a lock.
+  //
+  // ANYTHING ELSE THAT READS THIS STORE — an `IEventComputer` reading
+  // `ctx.store`, a provider, an embedder calling `get` — and wants a raw field
+  // or builtin under elision must call `declareRead` before the first tick.
+  // Keys an `IEventComputer` writes itself are never elided.
+
+  /// Declare that something reads `(streamKey, field)`. Returns true when the
+  /// key is (now) in the set; false only when the set is sealed and the key
+  /// is new, i.e. refused.
+  bool declareRead(const std::string& streamKey, const std::string& field);
+
+  /// Close the read set. Idempotent and thread-safe.
+  void sealReads();
+
+  bool readsSealed() const noexcept { return _readsSealed.load(std::memory_order_acquire); }
+
+  /// The declared fields of `streamKey`, or null when it has none. ONLY valid
+  /// once `readsSealed()` is true: the set is immutable from then on, so the
+  /// pointer is stable for the life of the store and is read without a lock.
+  /// Returns null when the set is not sealed.
+  const std::unordered_set<std::string>* sealedReadFieldsFor(const std::string& streamKey) const;
+
+  /// Diagnostic: the declared keys, sorted. A snapshot, like `snapshot()`.
+  std::vector<std::pair<std::string, std::string>> readKeys() const;
+
 private:
   using FieldMap = std::unordered_map<std::string, ArgType>;
 
@@ -78,6 +140,11 @@ private:
   std::unordered_map<std::string, FieldMap> _data;
   std::size_t _maxStreamKeys{0};         // 0 = unlimited
   std::size_t _maxFieldsPerStreamKey{0}; // 0 = unlimited
+
+  // ENC-1627. Guarded by `_readsMutex` until `_readsSealed`; immutable after.
+  mutable std::mutex _readsMutex;
+  std::atomic<bool>  _readsSealed{false};
+  std::unordered_map<std::string, std::unordered_set<std::string>> _reads;
 };
 
 } // namespace krn
