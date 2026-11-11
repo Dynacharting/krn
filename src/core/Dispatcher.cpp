@@ -246,27 +246,42 @@ void Dispatcher::ingest(const std::string& symbol,
     c->compute(symbol, fields, ctx);
   }
 
-  // Collect (field, listener) pairs for this symbol under the listener lock.
-  std::vector<std::pair<std::string, std::shared_ptr<INode>>> toNotify;
+  // Collect, under the listener lock, each subscribed field this tick carries
+  // together with ALL of its Listeners.
+  //
+  // ENC-1624: GROUPED BY FIELD, and the grouping is the fix. This used to be a
+  // flat list of (field, listener) PAIRS, and the loop below appended the raw
+  // value to the history and ran `computeAndStoreAtomics` once per PAIR. With
+  // N Listeners on `price`, each price entered `_histories[symbol]["price"]`
+  // N times and every builtin was recomputed N times over that corrupted
+  // window, so a derived value depended on how many unrelated subscriptions
+  // shared its source field. A value now enters its history once per field,
+  // the builtins run once per field, and only the raw delivery fans out.
+  //
+  // Delivery order is unchanged: fields in `_listeners`' (std::map) order, and
+  // within a field its Listeners in registration order — the same sequence the
+  // flat pair list produced. What disappears is the repeated derived delivery
+  // that used to sit between a field's second and later Listeners.
+  std::vector<std::pair<std::string, std::vector<std::shared_ptr<INode>>>>
+      toNotify;
   {
     std::shared_lock<std::shared_mutex> lock(_listenerMutex);
     auto lit = _listeners.find(symbol);
     if (lit != _listeners.end()) {
       for (auto& kv : lit->second) {
-        const std::string& field = kv.first;
-        for (auto& sp : kv.second) {
-          if (fields.has(field)) {
-            toNotify.emplace_back(field, sp);
-          }
-        }
+        if (kv.second.empty() || !fields.has(kv.first)) continue;
+        toNotify.emplace_back(kv.first, kv.second);
       }
     }
   }
 
-  for (auto& [field, node] : toNotify) {
+  for (auto& [field, nodes] : toNotify) {
     double raw = 0.0;
     if (!fields.tryGetNumber(field, raw)) continue;
 
+    // The caps reject the FIELD, and with it every Listener on it, exactly as
+    // before: the per-pair version decided the same way for each pair, since
+    // a rejected field is never inserted.
     std::vector<double> histVec;
     {
       std::unique_lock<std::shared_mutex> lock(_histMutex);
@@ -287,8 +302,10 @@ void Dispatcher::ingest(const std::string& symbol,
 
     computeAndStoreAtomics(symbol, field, histVec);
 
-    StreamValue out{ symbol, raw };
-    deliver(node, out);
+    const StreamValue out{ symbol, raw };
+    for (auto& node : nodes) {
+      deliver(node, out);
+    }
   }
 }
 
