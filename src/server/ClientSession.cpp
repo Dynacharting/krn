@@ -839,7 +839,7 @@ void ClientSession::handleSubscribe(const ::rapidjson::Document& doc) {
 
       // Log structured field uses "key" or "requestId" mirroring the
       // wire so operators grepping forum's instruction_id can hop
-      // straight into gma's view.
+      // straight into krn's view.
       krn::util::logger().log(krn::util::LogLevel::Info,
                               "ws.subscribe",
                               { {krn::server::isInt(key) ? "key" : "requestId",

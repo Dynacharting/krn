@@ -586,7 +586,7 @@ bool findFanInWithUpstream(const rapidjson::Value& spec,
   //     (`forum/internal/pipelinetranslate/config_mapping.go`) does carry
   //     `case "let"`, `case "ref"` and `case "switch"`, and `Let.body` /
   //     `Switch.cases` are passed through by `requireRaw` **unvalidated**, so
-  //     the whole node vocabulary reaches GMA through them — `Chain` included,
+  //     the whole node vocabulary reaches krn through them — `Chain` included,
   //     despite there being no `case "chain"`. The absence of a case label is
   //     not the absence of a path.
   //
