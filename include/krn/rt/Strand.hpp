@@ -23,9 +23,9 @@ namespace krn::rt {
 //   * in the order they were posted,
 // while still running on the shared pool's worker threads. It is the classic
 // "strand over an executor" construction — the same guarantee `asio::strand`
-// gives, expressed over the executor GMA actually has.
+// gives, expressed over the executor krn actually has.
 //
-// WHY NOT `asio::strand`, which D3 names. GMA's node graph does not run on an
+// WHY NOT `asio::strand`, which D3 names. krn's node graph does not run on an
 // `asio::io_context`: it runs on `krn::rt::ThreadPool` (`src/rt/ThreadPool.cpp`),
 // a hand-rolled mutex+condvar queue with no asio executor behind it. The only
 // `io_context` in the process belongs to `WebSocketServer`/`ClientSession` and

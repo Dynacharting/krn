@@ -586,7 +586,7 @@ bool findFanInWithUpstream(const rapidjson::Value& spec,
   //     (`forum/internal/pipelinetranslate/config_mapping.go`) does carry
   //     `case "let"`, `case "ref"` and `case "switch"`, and `Let.body` /
   //     `Switch.cases` are passed through by `requireRaw` **unvalidated**, so
-  //     the whole node vocabulary reaches GMA through them — `Chain` included,
+  //     the whole node vocabulary reaches krn through them — `Chain` included,
   //     despite there being no `case "chain"`. The absence of a case label is
   //     not the absence of a path.
   //
@@ -1246,7 +1246,7 @@ BuiltChain buildForRequest(const rapidjson::Value&      requestJson,
   // this line when the setting is on.
   Deps depsWithStrand = depsIn;
   if (!depsWithStrand.strand) {
-    if (depsWithStrand.dispatcher && depsWithStrand.dispatcher->inlineDagDrive())
+    if (false && depsWithStrand.dispatcher && depsWithStrand.dispatcher->inlineDagDrive())
       depsWithStrand.strand = krn::rt::Strand::makeInline();
     else if (depsWithStrand.pool)
       depsWithStrand.strand = std::make_shared<krn::rt::Strand>(depsWithStrand.pool);
