@@ -132,6 +132,11 @@ non-windowed graph. Confound to design around: krn and ClickHouse share one mach
 compete for cores and page cache, so `B2 ≥ B1` can be satisfied for the wrong reason —
 pinned cores or a sequential protocol, and a capped `max_server_memory_usage`. §14.
 
+*D13 status, 2026-11-10:* B1 (ENC-1485, krn-data #5) and B2 steps 1–2 (ENC-1487, krn-data #4)
+have run, **on the 2000-row real T5 sample only**. They give **no `B2 ≥ B1` verdict and no
+transport choice**; both wait for a multi-granule sample, and B2 is re-measured after
+ENC-1631. Numbers and scope: §5, *B1 and B2 on the T5 sample*.
+
 **D14 — Two deployment profiles, so ClickHouse being required is not a contradiction.**
 Research/ingest runs a single-node self-hosted ClickHouse by design; the client profile is
 live-only or reads a central L1 over the wire with no local store. Parquet and DuckDB are
@@ -347,6 +352,29 @@ bytes per column**. Whole-part ratios are `book_events` 70,099 → 16,322 (4.29�
 say nothing about §8.10's claim that `order_id` will dominate the table. Same reason B1/B2 are
 not reported here (D13, ENC-1485/ENC-1487): fixed costs dominate.
 
+**B1 and B2 on the T5 sample — ENC-1485 (krn-data #5) and ENC-1487 (krn-data #4).
+Sample-scoped: no `B2 ≥ B1` verdict, no transport choice.** Input is the 2000-row real T5
+sample above, repeated as iterations: B1 reads both tables (1000 rows each) and B2 drives the
+1000 `trades` rows. Full tables: krn-data `docs/data-layer.md` §14.3 and the two tickets'
+comments.
+
+- **B1: native and HTTP `ArrowStream` are within noise.** About 0.7M rows/s cold and
+  0.86–0.91M warm, with each arm inside the other's p10–p90 band in every cell. HTTP carries
+  ~23–27% more wire bytes, and clickhouse-cpp makes ~2.3× the allocations per block. At
+  ~1.1–1.5 ms per query the figure is per-query fixed cost, not a streaming ceiling.
+- **B1's block-size sweep collapsed.** ClickHouse 25.3 does not split a granule below
+  `max_block_size`, so every size from 64 to 65536 returned one 1000-row block per query.
+  "Where block size stops helping" cannot be answered from this sample.
+- **B1's "cold" is `posix_fadvise(DONTNEED)` eviction, read back with `mincore` as 0 resident
+  pages — not `drop_caches`** (root only), so dentries, inodes and the device cache stay warm.
+- **B2: `onRecord` is ~1.02× JSON `onTick`.** About 54k rows/s with 16 pool threads and 67k
+  with 1, byte-identical in 399 of 399 comparisons, 4 of 4 falsifications red.
+- **⚠ The B2 numbers predate ENC-1624.** The krn-data engine pin (`ca544ec`) still appended
+  each value to history and recomputed atomics once per Listener, which ENC-1624 removed. B2
+  is re-measured after ENC-1631 bumps the pin.
+- **Open until a multi-granule sample exists:** the transport choice (design doc §5.2) and any
+  `B2 ≥ B1` comparison (D13).
+
 **Q-level: `session_id` reuse on re-ingest — RULED, and the first answer was wrong.**
 Assigned to T5 from ENC-1480.
 
@@ -435,8 +463,21 @@ The 21-ticket plan in revision 2 of the design doc is the **post-measurement** p
 | T4 | ENC-1482 | `[krn] Databento DBN adapter` — trades + mbo → canonical batches | krn | 5 | T3 |
 | T5 | ENC-1483 | `[krn] ingest job` — 7d/1symbol → L1, retain DBN, completeness rows | krn | 4 | T2, T4 |
 | T6 | ENC-1484 | `[krn] measure book_events sort-key uniqueness` against real MBO | krn | 2 | T5 |
-| T7 | ENC-1485 | `[krn] B1 benchmark` — ClickHouse → krn transport, native vs HTTP | krn | 4 | T5 |
+| T7 | ENC-1485 | `[krn] B1 benchmark` — ClickHouse → krn transport, native vs HTTP — **Done**, krn-data #5 | krn-data | 4 | T5 |
 | T8 | ENC-1486 | `[krn] Dispatcher::onRecord` — non-JSON ingress | krn | 4 | T3 |
-| T9 | ENC-1487 | `[krn] B2 benchmark` — rows/sec through the DAG | krn | 5 | T7, T8 |
+| T9 | ENC-1487 | `[krn] B2 benchmark` — rows/sec through the DAG — **Done** (steps 1–2), krn-data #4 | krn-data | 5 | T7, T8 |
+
+Follow-ups filed by T7/T9:
+
+| id | title | repo | est | deps |
+|---|---|---|---|---|
+| ENC-1624 | ingest appends to history and recomputes atomics once per Listener — **Done**, krn #112 | krn | 2 | — |
+| ENC-1625 | B2 step 3 — inline DAG drive | krn | 4 | ENC-1631 |
+| ENC-1626 | B2 step 4 — interned symbols on the value path | krn | 4 | ENC-1631 |
+| ENC-1627 | B2 step 5 — store-write elision | krn | 4 | ENC-1631 |
+| ENC-1628 | a `FieldSource` for BookRecords, so B2 can drive the mbo half | krn-data | 3 | — |
+| ENC-1629 | `check_no_compute.py` ignores `STACK_PORT_OFFSET` | krn-data | 1 | — |
+| ENC-1630 | record the sample-scoped B1/B2 results in this SPEC | krn | 1 | T7, T9 |
+| ENC-1631 | bump the engine pin past ENC-1624 and re-measure B2 steps 1–2 | krn-data | 2 | ENC-1624 |
 
 Critical path: T1 → T2 → T5 → T7 → T9. T3/T8 and T1/T2 parallelise.
