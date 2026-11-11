@@ -83,6 +83,24 @@ public:
   // Default OFF because there is no wire-level version negotiation for it.
   bool atomicKeyNamespaceByField = false;
 
+  // ENC-1625 — run each request DAG on an INLINE executor (B2 step 3, SPEC
+  // specs/2026-10-14-krn-data-layer D3).
+  //
+  // OFF (default, and today's behaviour): each request DAG's `rt::Strand` runs
+  // on the shared `ThreadPool`, so every value a Listener receives costs one
+  // `ThreadPool::post` hop before the nodes below it run.
+  //
+  // ON: `tree::buildForRequest` gives the DAG an inline strand
+  // (`rt::Strand::makeInline()`), which drains on the caller — the ingress
+  // thread — in post order. The whole DAG then runs on the thread that called
+  // `Dispatcher::onTick` / `onRecord`, with no pool hop anywhere between nodes.
+  // Same nodes, same order, same arithmetic: bit-identical to OFF under ONE
+  // ingress thread (join-correctness D3's own precondition, its §5 Q8). The
+  // cost is that ingress blocks for the DAG's compute, so this is for replay
+  // and benchmarks, not a live feed. Timer nodes (Interval, BucketTime,
+  // TumblingWindow) still post from their own threads, as they do when OFF.
+  bool inlineDagDrive = false;
+
   // Metrics reporter
   bool metricsEnabled = false;
   int  metricsIntervalSec = 15;

@@ -102,6 +102,12 @@ public:
   // src/ calls it.
   std::size_t subscriptionCount() const;
 
+  // ENC-1625. `util::Config::inlineDagDrive` as this Dispatcher was built with
+  // it. Read by the strand mint sites (`tree::buildForRequest`,
+  // `ClientSession::handleSubscribe`) to pick the DAG's executor; nothing on
+  // the delivery path reads it.
+  bool inlineDagDrive() const noexcept { return _cfg.inlineDagDrive; }
+
   // Generic event ingress. Invokes every registered computer, then fans the
   // raw payload fields out to direct-field subscribers.
   //
