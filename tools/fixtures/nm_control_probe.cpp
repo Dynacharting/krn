@@ -31,9 +31,9 @@ namespace krn::market { int krn_isolation_nm_probe() { return 8; } }
 namespace krn::nm_probe {
 struct OrderBookManager;
 int krn_isolation_nm_probe(const OrderBookManager*) { return 9; }
-int krn_isolation_nm_probe(int sma_20) { return sma_20; }  // a parameter name
-}                                                         // is not a symbol
-namespace krn::nm_probe { struct sma_20 {}; int krn_isolation_nm_probe(sma_20) { return 10; } }
+struct sma_20 {};                                // a prefix word: sma_ -> sma_20
+int krn_isolation_nm_probe(sma_20) { return 10; }
+}
 
 // Decoys.  Each is close to a rule and must not trip it.
 namespace krn::data { class SymbolTable; }  // the engine's own krn::data type
