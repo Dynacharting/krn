@@ -63,12 +63,14 @@ BucketTime::bucketStartMsFor(
 }
 
 void BucketTime::timerLoop(const std::shared_ptr<State>& st) {
+  // MUTATION ENC-1639: start-relative phase (Interval-like) — misaligns nodes started at different moments
+  const auto phase = std::chrono::milliseconds{std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count() % st->period.count()};
   while (true) {
     if (st->stopping.load(std::memory_order_acquire))
       break;
 
     const auto now = std::chrono::system_clock::now();
-    const auto target = nextAlignedAfter(now, st->period);
+    const auto target = nextAlignedAfter(now - phase, st->period) + phase;
     // ENC-1280: the boundary used to die here as a loop-body local. Keep the
     // identity of the bucket that closes at `target` so the pulse carries the
     // bar it belongs to all the way to the responder (SPEC D9).
