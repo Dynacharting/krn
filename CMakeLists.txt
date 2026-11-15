@@ -486,6 +486,7 @@ if (KRN_BUILD_TESTS)
     tests/dispatch/InlineDagDriveTest.cpp
     tests/dispatch/StoreWriteElisionTest.cpp
     tests/dispatch/ListenerMultiplicityTest.cpp
+    tests/dispatch/ListenerSnapshotTest.cpp
     tests/dispatch/RecordIngressEngineTest.cpp
     tests/engine/ConnectorLifecycleTest.cpp
     tests/engine/EngineRegistriesShapeTest.cpp
