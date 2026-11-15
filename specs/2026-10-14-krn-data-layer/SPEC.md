@@ -276,20 +276,20 @@ below); whether `ob::Provider` consults `isStale` before serving `ob.*` (post-me
   (ENC-1483) must settle this against real MBO before the first ingest** — it is a wrong
   *answer*, not a cosmetic bug.
 - ~~**Can `gma.ingest_windows` be `ReplacingMergeTree(completed_at)`, as revision 2 had it,
-  with `FINAL` or `argMax` on the read path as the mitigation?**~~ **SETTLED by T2
-  (ENC-1480), measured on ClickHouse 25.3.14.14: NO.** `completed_at` is a *completion*
-  clock, so the in-flight row a re-ingest writes carries `0`. After `(state=1,
-  completed_at=T)` then `(state=0, completed_at=0)`, `SELECT state … FINAL` and
-  `argMax(state, completed_at)` both return the stale `1`, and after `OPTIMIZE TABLE … FINAL`
-  only `(1, T)` survives: the engine deletes the row that says "not loaded". The window then
-  reads complete permanently and silently, which is D11's failure. The read-path mitigation
-  does not mitigate it. Reproduced independently on the same server. The finding is scoped
-  to that version; the shipped design does not depend on it, because nothing in the
-  replacement dedups. What shipped is D11's mechanism note above. The reversal is a gate:
-  krn-data `data/schema/check_no_compute.py` rejects `ingest_windows` with any engine but
-  plain `MergeTree`, and its self-test carries the `ReplacingMergeTree(completed_at)` mutant.
-  `gma.symbology` stays the one `ReplacingMergeTree`, with `ingested_at` as a genuine write
-  clock.
+  with `FINAL` or a max-by-`completed_at` aggregate on the read path as the
+  mitigation?**~~ **SETTLED by T2 (ENC-1480), measured on ClickHouse 25.3.14.14: NO.**
+  `completed_at` is a *completion* clock, so the in-flight row a re-ingest writes carries
+  `0`. After `(state=1, completed_at=T)` then `(state=0, completed_at=0)`, `SELECT state …
+  FINAL` and the max-by-`completed_at` aggregate both return the stale `1`, and after
+  `OPTIMIZE TABLE … FINAL` only `(1, T)` survives: the engine deletes the row that says "not
+  loaded". The window then reads complete permanently and silently, which is D11's failure.
+  The read-path mitigation does not mitigate it. Reproduced independently on the same
+  server. The finding is scoped to that version; the shipped design does not depend on it,
+  because nothing in the replacement dedups. What shipped is D11's mechanism note above. The
+  reversal is a gate: krn-data `data/schema/check_no_compute.py` rejects `ingest_windows`
+  with any engine but plain `MergeTree`, and its self-test carries the
+  `ReplacingMergeTree(completed_at)` mutant. `gma.symbology` stays the one
+  `ReplacingMergeTree`, with `ingested_at` as a genuine write clock.
 
 **Facts T5 (ENC-1483) settled by measurement, against the real Databento sample Nick
 pulled** — `XNAS.ITCH`, `MSFT`, `mbo` + `trades`, requested `2022-06-10 12:30:00–14:00:00
