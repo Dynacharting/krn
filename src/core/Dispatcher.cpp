@@ -114,7 +114,7 @@ void Dispatcher::ingest(const std::string& symbol,
   // builtins, written by computeAndStoreAtomics below) and connector-computed
   // values. The injected value itself went to Listeners and was then dropped,
   // so an externally computed series — a client bringing its own RSI rather
-  // than having gma recompute it — could not be read by AtomicAccessor and so
+  // than having krn recompute it — could not be read by AtomicAccessor and so
   // could not be driven from an Interval clock (§8.1).
   //
   // Deliberately NOT gated on having a registered Listener: an
