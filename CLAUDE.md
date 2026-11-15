@@ -240,6 +240,15 @@ Other engine keys parsed by `src/util/Config.cpp` (defaults from `Config.hpp`):
   ingress thread with no `ThreadPool::post` between nodes. Bit-identical to off under one
   ingress thread; ingress blocks for the DAG's compute, so it is for replay and benchmarks
   (ENC-1625, B2 step 3). Pinned by `tests/dispatch/InlineDagDriveTest.cpp`.
+- **Store-write elision:** `storeWriteElision` (false) — when on, the Dispatcher writes raw
+  fields and builtin atomics only to `(streamKey, field)` keys a pull node declared
+  (`AtomicAccessor` calls `AtomicStore::declareRead` when it is built). Every declared key is
+  bit-identical to off after every tick; the store just holds fewer keys. The first tick
+  **seals** the read set: after it, a pull read on a key nobody declared is refused at build
+  time (the build throws), while an already-declared key, including a torn-down request's,
+  stays accepted. Any other store reader (an `IEventComputer` reading `ctx.store`) must
+  declare its keys before the first tick. For replay and benchmarks (ENC-1627, B2 step 5).
+  Pinned by `tests/dispatch/StoreWriteElisionTest.cpp`.
 - **Ingress (ENC-31, the current model):** `ingress.N.kind` plus per-entry
   sub-keys (`ingress.N.port`, `ingress.N.url`, `ingress.N.adapter`,
   `ingress.N.symbols`, …). The engine instantiates each entry by the kind a
