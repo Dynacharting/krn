@@ -128,7 +128,12 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full picture including 
   way of breaking the invariant still compiles and still passes every other test, so it is
   asserted by `tools/check_engine_isolation.py` as the ctest cases `krn_engine_isolation`
   (checks A–E; check E's market vocabulary is regenerated from git history by `tools/derive_market_vocabulary.py` and has a fixture control; refuses to pass on vacuous input) and `krn_engine_isolation_selftest` (runs
-  each predicate against an input that violates it). Run them before claiming a layering
+  each predicate against an input that violates it), plus `krn_engine_isolation_artifact`
+  (check F, ENC-1491: `nm -C` over the *built* `libkrn_engine.a`, `libkrn_host.a` and
+  `krn_engine_server` for Arrow/Parquet/Gandiva/ClickHouse/DuckDB, `krn_data` and market
+  symbols — the rules come from the forbidden include prefixes and check E's vocabulary; its
+  control is the compiled, never-linked `krn_isolation_nm_control`; no nm or no artifact is
+  exit 2). Run them before claiming a layering
   change is safe; `--selftest` needs no build. **Checks C and D walk the transitive link
   closure**, because `krn_engine_server` links only `krn_host` and the plugin: one
   `target_link_libraries(krn_host PUBLIC krn_data)` breaks the live-only build while the
