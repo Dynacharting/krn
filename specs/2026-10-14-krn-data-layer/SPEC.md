@@ -335,7 +335,7 @@ back through ENC-1482's adapter. One mapping to canonical form exists and it is 
   them. Stated plainly rather than implied by an absence. Canonically the 1000 `mbo` records
   become `Add` 345, `Delete` 402, `Update` 5 (the five partial cancels), `Trade` 248
   (= 157 `T` + 91 `F`). `side` `N` appears on 65 `mbo` rows (all `Trade`, all carrying
-  `kGmaFlagSideUnspecified`) and on 546 of 1000 `trades` rows (all `Aggressor::Unknown`).
+  `kGmaFlagSideUnspecified` at the time; `Side::None` since ENC-1494, below) and on 546 of 1000 `trades` rows (all `Aggressor::Unknown`).
 
 **And three facts T5 found that nothing in the design anticipated:**
 
@@ -449,14 +449,26 @@ cannot *establish* completeness (D11), but it can *refute* a claim**: a `state=1
 claiming `rows_inserted > 0` whose range holds **zero** rows is not quiet, it is a lie. That
 check was observed red on exactly that condition and green after `krn_ingest reload`.
 
-**One gap T4 found in ENC-1481's schema, reported rather than patched around:**
+~~**One gap T4 found in ENC-1481's schema, reported rather than patched around:**
 `BookRecord::side` is two-valued (`Bid`/`Ask`) and `gma.book_events.side` is its `UInt8`, but
 DBN's `Side` is three-valued and `Side::None` is normal on a `Trade` record from a venue that
 does not report an aggressor. `TickRecord` is fine — `Aggressor::Unknown` exists — but
 `BookRecord` has no aggressor field and no "no side". The adapter marks such a row with
 `kGmaFlagSideUnspecified` in the free high byte of `flags`, which is lossless and asserted;
 the real fix is for `BookRecord` to carry an `Aggressor` for `BookAction::Trade` rows, or for
-`side` to mirror DBN's three values. Related and deliberate: `BookAction::Trade` rows are
+`side` to mirror DBN's three values.~~ **SETTLED by ENC-1494 (krn-data #12, `785b95e`): both
+fixes shipped.** `Side` is `{ Bid = 0, Ask = 1, None = 2 }`, and `BookRecord` carries its own
+`aggressor` (`Aggressor::Unknown` on every action but `Trade`). `side` now has one meaning:
+the **resting** side on every row, a print's passive side included, and `None` when the
+venue gave none. A default-constructed `BookRecord` is `Side::None` / `Aggressor::Unknown`, so
+an unset field cannot read as a bid. `gma.book_events` (`krn.book_events` in krn-data) gained
+an `aggressor` column, and `kSchemaVersion` is 2. The flag bit 0x0100, `kKrnFlagSideUnspecified`
+in krn-data, is retired rather than reused: the adapter's high byte of `flags` is always 0.
+An L1 loaded under the old shape is reloaded from the retained DBN (D6), not migrated in
+place. On the real T5 sample every `T` with a side has an `F` at the same `(ts_event,
+sequence)` with the opposite side, 91 of 91, so both rows of one execution carry the same
+`side` and `aggressor`; the 65 `T` rows with side `N` have no `F` and get `Side::None` and
+`Aggressor::Unknown`. Related and deliberate: `BookAction::Trade` rows are
 **unconditionally book-neutral** — DBN's own documentation for both `Action::Trade` and
 `Action::Fill` is "Does not affect the book" — which is why `gma.book_events` needs no
 `book_neutral` column: for a DBN-fed table the value is a constant. State that as **this
@@ -468,8 +480,8 @@ production emission sites set the flag; that is the narrower true claim. A futur
 provider has to state its own answer rather than inherit this one.
 
 A related defect this work introduced and then fixed, because it is the cost of the column
-`BookRecord::side` is: that column means the **resting** order's side on
-Add/Update/Delete/Clear and the **aggressor**'s on a `Trade` row. `ItchAdapter` cannot mix
+`BookRecord::side` is: that column ~~means~~ meant, until ENC-1494, the **resting** order's
+side on Add/Update/Delete/Clear and the **aggressor**'s on a `Trade` row. `ItchAdapter` cannot mix
 them — its `ObUpdateEvent`/`ObDeleteEvent` carry no side at all, and only `ObTradeEvent` gets
 the flipped aggressor — but this adapter added the column, so it owns the separation. The
 first version flipped one variable before dispatch, so a `Fill` under
