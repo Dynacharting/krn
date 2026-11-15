@@ -170,6 +170,7 @@ TEST(BucketTimeTest, TwoBucketTimesShareBoundary) {
       {std::lock_guard<std::mutex> lk(stub2->mx);n2=stub2->ticks.size();}
       long maxLate=0; // arrival lateness vs nearest boundary
       for(auto*v:{&ticks1,&ticks2}) for(auto&t:*v){long o=duration_cast<milliseconds>(t.time_since_epoch()).count()%50; if(o>maxLate) maxLate=o;}
+      {std::string o="DIAGB b1:";for(auto&t:ticks1)o+=" "+std::to_string(duration_cast<milliseconds>(t.time_since_epoch()).count()/50%1000);o+=" b2:";for(auto&t:ticks2)o+=" "+std::to_string(duration_cast<milliseconds>(t.time_since_epoch()).count()/50%1000);fprintf(stderr,"%s\n",o.c_str());}
       if(n1!=ticks1.size()||n2!=ticks2.size()||maxLate>25) fprintf(stderr,"DIAG late1=%zu late2=%zu maxLateMs=%ld\n",n1-ticks1.size(),n2-ticks2.size(),maxLate);
     }
 
