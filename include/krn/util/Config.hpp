@@ -101,6 +101,42 @@ public:
   // TumblingWindow) still post from their own threads, as they do when OFF.
   bool inlineDagDrive = false;
 
+  // ENC-1627 — STORE-WRITE ELISION (B2 step 5, SPEC
+  // specs/2026-10-14-krn-data-layer D3).
+  //
+  // OFF (default, and today's behaviour): the Dispatcher writes every admitted
+  // raw field of a tick (ENC-1007) and every subscribed builtin it computes
+  // into the `AtomicStore`, whether or not anything ever reads them back.
+  //
+  // ON: those two kinds of write go only to `(streamKey, field)` keys some pull
+  // node reads — the keys `AtomicAccessor`s declared to the store when they
+  // were built (`AtomicStore::declareRead`). Nothing else changes: the same
+  // builtins are computed, the same values are pushed to the same Listeners in
+  // the same order, the raw-admission and history caps decide exactly as
+  // before, and `IEventComputer` writes are untouched. Every key a pull node
+  // reads therefore holds, after every tick, exactly the bytes it holds with
+  // the setting OFF; the store simply holds fewer keys.
+  //
+  // THE PRICE IS A CLOSED READ SET. The first tick a Dispatcher with this on
+  // ingests SEALS the store's read set (`AtomicStore::sealReads`), and from
+  // then on a pull node on a key nobody declared before that tick is REFUSED
+  // at build time (the build throws; `ClientSession` replies with a build
+  // error). A key declared before the seal stays declared for the life of the
+  // store — tearing a request down never undeclares it — so rebuilding a pull
+  // read on it later is always accepted and always reads a current value.
+  // Backfill is not offered because it cannot be exact: the elided raw value
+  // was never kept anywhere. See `AtomicStore::declareRead` for the rest.
+  //
+  // So this is for replay and benchmarks with a graph built up front, like
+  // `inlineDagDrive`, not for a live server taking new subscriptions. Anything
+  // else that reads the store — a plugin's `IEventComputer` reading
+  // `ctx.store`, an embedder calling `get` — must declare its keys before the
+  // first tick too, or it will see a key elided. Two documented differences
+  // remain, both by design: `AtomicStore::snapshot()` holds fewer entries, and
+  // under `AtomicStore::setCaps` a read key that the OFF run's unread keys
+  // pushed past a cap can be admitted ON (a value gained, never one lost).
+  bool storeWriteElision = false;
+
   // Metrics reporter
   bool metricsEnabled = false;
   int  metricsIntervalSec = 15;
