@@ -118,6 +118,20 @@ the ingest job and `IL1Store::isComplete` makes a query over an incomplete windo
 rather than answer short. Row counts cannot substitute: a quiet window and a missing window
 have the same count. §8.8.
 
+*D11 mechanism, as shipped by T2 (ENC-1480):* `gma.ingest_windows` (the DB is `krn` in
+krn-data since ENC-1485, so `krn.ingest_windows`) is a plain-`MergeTree`, unpartitioned
+**append-only transition log**: one row per state change of one window, never an update in
+place, ordered by `(symbol, kind, from_ts, to_ts, updated_at)`. `updated_at` is a **write**
+clock, `DateTime64(3)` with `DEFAULT now64(3)`, and `session_id` is deliberately not in the
+key. A window counts only when its **newest row by `updated_at` is `state = 1`**, and the
+request must be covered by the union of such windows; no row at all means not ingested, and
+the query fails. The read rule, its tie rule (lowest state wins) and the one admissible count
+(a count can refute a `state = 1` claim, never establish one) are krn-data
+`docs/data-layer.md` §8.8. Today the rule is implemented once, as `krn::data::isComplete`,
+called only by `krn_ingest verify`. `IL1Store::isComplete` is still a pure virtual with no
+defined override, because the planner is not built. Why the engine is not
+`ReplacingMergeTree(completed_at)`: §5, settled by measurement.
+
 **D12 — trades + MBO puts every execution in the store twice; the planner refuses both.**
 An execution is a `trades` row *and* MBO trade/fill records — two views, not duplicates, but
 a graph reading both double-counts volume. `ObTradeEvent::bookNeutral` is the existing
@@ -261,6 +275,21 @@ below); whether `ob::Provider` consults `isStale` before serving `ob.*` (post-me
   `DatabentoAdapter::Config::fillReducesRestingOrder`, with both branches tested. **T5
   (ENC-1483) must settle this against real MBO before the first ingest** — it is a wrong
   *answer*, not a cosmetic bug.
+- ~~**Can `gma.ingest_windows` be `ReplacingMergeTree(completed_at)`, as revision 2 had it,
+  with `FINAL` or a max-by-`completed_at` aggregate on the read path as the
+  mitigation?**~~ **SETTLED by T2 (ENC-1480), measured on ClickHouse 25.3.14.14: NO.**
+  `completed_at` is a *completion* clock, so the in-flight row a re-ingest writes carries
+  `0`. After `(state=1, completed_at=T)` then `(state=0, completed_at=0)`, `SELECT state …
+  FINAL` and the max-by-`completed_at` aggregate both return the stale `1`, and after
+  `OPTIMIZE TABLE … FINAL` only `(1, T)` survives: the engine deletes the row that says "not
+  loaded". The window then reads complete permanently and silently, which is D11's failure.
+  The read-path mitigation does not mitigate it. Reproduced independently on the same
+  server. The finding is scoped to that version; the shipped design does not depend on it,
+  because nothing in the replacement dedups. What shipped is D11's mechanism note above. The
+  reversal is a gate: krn-data `data/schema/check_no_compute.py` rejects `ingest_windows`
+  with any engine but plain `MergeTree`, and its self-test carries the
+  `ReplacingMergeTree(completed_at)` mutant. `gma.symbology` stays the one
+  `ReplacingMergeTree`, with `ingested_at` as a genuine write clock.
 
 **Facts T5 (ENC-1483) settled by measurement, against the real Databento sample Nick
 pulled** — `XNAS.ITCH`, `MSFT`, `mbo` + `trades`, requested `2022-06-10 12:30:00–14:00:00
@@ -306,7 +335,7 @@ back through ENC-1482's adapter. One mapping to canonical form exists and it is 
   them. Stated plainly rather than implied by an absence. Canonically the 1000 `mbo` records
   become `Add` 345, `Delete` 402, `Update` 5 (the five partial cancels), `Trade` 248
   (= 157 `T` + 91 `F`). `side` `N` appears on 65 `mbo` rows (all `Trade`, all carrying
-  `kGmaFlagSideUnspecified`) and on 546 of 1000 `trades` rows (all `Aggressor::Unknown`).
+  `kGmaFlagSideUnspecified` at the time; `Side::None` since ENC-1494, below) and on 546 of 1000 `trades` rows (all `Aggressor::Unknown`).
 
 **And three facts T5 found that nothing in the design anticipated:**
 
@@ -420,14 +449,26 @@ cannot *establish* completeness (D11), but it can *refute* a claim**: a `state=1
 claiming `rows_inserted > 0` whose range holds **zero** rows is not quiet, it is a lie. That
 check was observed red on exactly that condition and green after `krn_ingest reload`.
 
-**One gap T4 found in ENC-1481's schema, reported rather than patched around:**
+~~**One gap T4 found in ENC-1481's schema, reported rather than patched around:**
 `BookRecord::side` is two-valued (`Bid`/`Ask`) and `gma.book_events.side` is its `UInt8`, but
 DBN's `Side` is three-valued and `Side::None` is normal on a `Trade` record from a venue that
 does not report an aggressor. `TickRecord` is fine — `Aggressor::Unknown` exists — but
 `BookRecord` has no aggressor field and no "no side". The adapter marks such a row with
 `kGmaFlagSideUnspecified` in the free high byte of `flags`, which is lossless and asserted;
 the real fix is for `BookRecord` to carry an `Aggressor` for `BookAction::Trade` rows, or for
-`side` to mirror DBN's three values. Related and deliberate: `BookAction::Trade` rows are
+`side` to mirror DBN's three values.~~ **SETTLED by ENC-1494 (krn-data #12, `785b95e`): both
+fixes shipped.** `Side` is `{ Bid = 0, Ask = 1, None = 2 }`, and `BookRecord` carries its own
+`aggressor` (`Aggressor::Unknown` on every action but `Trade`). `side` now has one meaning:
+the **resting** side on every row, a print's passive side included, and `None` when the
+venue gave none. A default-constructed `BookRecord` is `Side::None` / `Aggressor::Unknown`, so
+an unset field cannot read as a bid. `gma.book_events` (`krn.book_events` in krn-data) gained
+an `aggressor` column, and `kSchemaVersion` is 2. The flag bit 0x0100, `kKrnFlagSideUnspecified`
+in krn-data, is retired rather than reused: the adapter's high byte of `flags` is always 0.
+An L1 loaded under the old shape is reloaded from the retained DBN (D6), not migrated in
+place. On the real T5 sample every `T` with a side has an `F` at the same `(ts_event,
+sequence)` with the opposite side, 91 of 91, so both rows of one execution carry the same
+`side` and `aggressor`; the 65 `T` rows with side `N` have no `F` and get `Side::None` and
+`Aggressor::Unknown`. Related and deliberate: `BookAction::Trade` rows are
 **unconditionally book-neutral** — DBN's own documentation for both `Action::Trade` and
 `Action::Fill` is "Does not affect the book" — which is why `gma.book_events` needs no
 `book_neutral` column: for a DBN-fed table the value is a constant. State that as **this
@@ -439,8 +480,8 @@ production emission sites set the flag; that is the narrower true claim. A futur
 provider has to state its own answer rather than inherit this one.
 
 A related defect this work introduced and then fixed, because it is the cost of the column
-`BookRecord::side` is: that column means the **resting** order's side on
-Add/Update/Delete/Clear and the **aggressor**'s on a `Trade` row. `ItchAdapter` cannot mix
+`BookRecord::side` is: that column ~~means~~ meant, until ENC-1494, the **resting** order's
+side on Add/Update/Delete/Clear and the **aggressor**'s on a `Trade` row. `ItchAdapter` cannot mix
 them — its `ObUpdateEvent`/`ObDeleteEvent` carry no side at all, and only `ObTradeEvent` gets
 the flipped aggressor — but this adapter added the column, so it owns the separation. The
 first version flipped one variable before dispatch, so a `Fill` under

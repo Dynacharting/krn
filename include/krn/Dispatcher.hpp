@@ -226,8 +226,7 @@ public:
 
   // Public hook that IEventComputer implementations call to deliver a computed
   // value to listeners subscribed on (symbol, field). Snapshot semantics — the
-  // listener lock is held only while taking the symbol's copy-on-write
-  // snapshot (one shared_ptr; ENC-1634), never while delivering.
+  // listener lock is held only while copying subscriber shared_ptrs.
   void notifyListeners(const std::string& symbol,
                        const std::string& field,
                        double value);
@@ -325,34 +324,11 @@ private:
       std::unordered_map<std::string, std::deque<double>>
   > _histories;
 
-  // Listener lists per (symbol, field), COPY-ON-WRITE (ENC-1634).
-  //
-  // Each symbol's field map is IMMUTABLE once published. `registerListener` /
-  // `unregisterListener` build a new map from the current one and swap the
-  // `shared_ptr` under the unique lock; a symbol whose last subscription goes
-  // is erased, so a published map is never empty. A reader copies ONE
-  // `shared_ptr` under the shared lock and walks the map with no lock held.
-  //
-  // That is how the Dispatcher keeps its no-lock-while-calling-out rule —
-  // `onValue()`/`post()` never run under `_listenerMutex`, because a node may
-  // (un)register from inside `onValue` and that takes the unique lock — while
-  // no longer paying for it with a copy. Until ENC-1634
-  // `computeAndStoreAtomics` deep-copied this whole map (every vector, every
-  // `shared_ptr` refcount) on every call, i.e. per field per tick.
-  //
-  // The snapshot a reader holds is exactly the copy it used to make: a change
-  // published while it iterates is seen by the reader's NEXT acquisition, not
-  // by this one. Inner container is `std::map`, so field order is
-  // deterministic; each vector is in registration order.
-  using FieldListeners =
-      std::map<std::string, std::vector<std::shared_ptr<INode>>>;
-  std::unordered_map<std::string, std::shared_ptr<const FieldListeners>>
-      _listeners;
-
-  // One `shared_ptr` copy of `symbol`'s current map under the shared lock;
-  // null when nothing is subscribed on the symbol.
-  std::shared_ptr<const FieldListeners>
-  listenerSnapshot(const std::string& symbol) const;
+  // Listener lists per (symbol, field)
+  std::unordered_map<
+      std::string,
+      std::map<std::string, std::vector<std::shared_ptr<INode>>>
+  > _listeners;
 
   // Computers added explicitly via addComputer(). Filtered by eventType() on
   // every onTick. Kept separate from the registry-driven cache so test code

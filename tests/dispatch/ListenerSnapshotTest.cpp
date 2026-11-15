@@ -256,6 +256,41 @@ TEST(ListenerSnapshot, ReentrantRegisterUnregisterPooled) {
   underWatchdog("Pooled", [] { runChurn(Mode::Pooled); });
 }
 
+// ONE SNAPSHOT PER TICK, ACROSS FIELDS. A tick carrying `ask` and `bid`: the
+// `ask` Listener (served first, std::map order) registers `late` on `bid` and
+// unregisters `doomed` from `bid`. `bid`'s raw fan-out in the SAME tick still
+// uses the snapshot taken before `ask` was delivered — `doomed` receives,
+// `late` does not — exactly as master's per-tick copy did. From the next tick
+// the change is in force. (An ingest that re-snapshotted per field would fail
+// the first-tick half of this.)
+TEST(ListenerSnapshot, OneSnapshotPerTickAcrossFields) {
+  underWatchdog("AcrossFields", [] {
+    Log log;
+    Dispatcher disp(nullptr, nullptr, util::Config{});
+    auto doomed = std::make_shared<Recorder>("doomed", &log);
+    auto late   = std::make_shared<Recorder>("late", &log);
+    auto askL = std::make_shared<Churner>("ask", &log, false, [&](int n) {
+      if (n == 0) {
+        disp.registerListener(kSym, "bid", late);
+        disp.unregisterListener(kSym, "bid", doomed);
+      }
+    });
+    disp.registerListener(kSym, "ask", askL);
+    disp.registerListener(kSym, "bid", doomed);
+    auto tick = [] {
+      auto d = std::make_shared<rapidjson::Document>();
+      d->SetObject();
+      d->AddMember("ask", 1.0, d->GetAllocator());
+      d->AddMember("bid", 2.0, d->GetAllocator());
+      return Event{kSym, std::move(d)};
+    };
+    disp.onTick(tick());
+    EXPECT_EQ(log.copy(), (std::vector<std::string>{"ask", "doomed"}));
+    disp.onTick(tick());
+    EXPECT_EQ(log.copy(), (std::vector<std::string>{"ask", "doomed", "ask", "late"}));
+  });
+}
+
 // notifyListeners (the IEventComputer hook) has the same contract: a node it
 // calls may unregister every listener on the field, itself included, and the
 // rest of THIS call's fan-out still happens.

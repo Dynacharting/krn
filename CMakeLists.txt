@@ -781,6 +781,45 @@ if (_krn_top_level AND KRN_BUILD_TESTS)
   target_link_libraries(krn_isolation_control
     INTERFACE arrow::arrow_control_probe)
 
+  # Check F's positive control (ENC-1491): a real object carrying one symbol
+  # per forbidden-symbol rule, which `nm` must see. Same IPO setting as
+  # krn_engine, so it is the archive format the check reads there. Scanned,
+  # never linked, exactly like krn_isolation_control above.
+  add_library(krn_isolation_nm_control STATIC
+    "${PROJECT_SOURCE_DIR}/tools/fixtures/nm_control_probe.cpp")
+  get_target_property(_krn_iso_ipo krn_engine INTERPROCEDURAL_OPTIMIZATION)
+  if (_krn_iso_ipo)
+    set_property(TARGET krn_isolation_nm_control
+      PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+  endif()
+
+  # The nm check F runs. gcc-nm / llvm-nm load the LTO plugin themselves, so
+  # they are preferred next to the compiler; CMAKE_NM is the fallback. None
+  # found is not a configure error: the check then exits 2 (could not run)
+  # and says which invariant went unchecked, which is what ctest must show.
+  get_filename_component(_krn_iso_cxx_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+  string(REGEX MATCH "^[0-9]+" _krn_iso_cxx_major "${CMAKE_CXX_COMPILER_VERSION}")
+  if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    set(_krn_iso_nm_names gcc-nm-${_krn_iso_cxx_major} gcc-nm)
+  elseif (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    set(_krn_iso_nm_names llvm-nm-${_krn_iso_cxx_major} llvm-nm)
+  else()
+    set(_krn_iso_nm_names "")
+  endif()
+  if (_krn_iso_nm_names)
+    find_program(KRN_ISOLATION_NM NAMES ${_krn_iso_nm_names}
+      HINTS "${_krn_iso_cxx_dir}")
+  endif()
+  if (NOT KRN_ISOLATION_NM AND CMAKE_NM)
+    set(KRN_ISOLATION_NM "${CMAKE_NM}")
+  endif()
+  if (NOT KRN_ISOLATION_NM)
+    message(WARNING "krn_engine_isolation_artifact: no nm found; the ctest "
+      "case will exit 2 and the SPEC D14 invariant will not be checked "
+      "against the built artifacts")
+  endif()
+  message(STATUS "krn_engine_isolation_artifact: nm = ${KRN_ISOLATION_NM}")
+
   # THE TARGET LIST IS ENUMERATED FROM CMAKE, NOT HAND-WRITTEN. A hand-written
   # list reproduces the original hole one level deeper: a new first-party
   # library would arrive with no row, be treated by the checker as a leaf, and
@@ -824,6 +863,11 @@ engine_cmake_sources=$<JOIN:$<TARGET_PROPERTY:krn_engine,SOURCES>,|>
 host_cmake_sources=$<JOIN:$<TARGET_PROPERTY:krn_host,SOURCES>,|>
 engine_server_cmake_sources=$<JOIN:$<TARGET_PROPERTY:krn_engine_server,SOURCES>,|>
 rapidjson_include_dir=${RAPIDJSON_INCLUDE_DIR}
+nm=${KRN_ISOLATION_NM}
+nm_control=$<TARGET_FILE:krn_isolation_nm_control>
+artifact.krn_engine=$<TARGET_FILE:krn_engine>
+artifact.krn_host=$<TARGET_FILE:krn_host>
+artifact.krn_engine_server=$<TARGET_FILE:krn_engine_server>
 ${_krn_iso_link_rows}")
 
   if (Python3_Interpreter_FOUND)
@@ -832,6 +876,15 @@ ${_krn_iso_link_rows}")
               "${PROJECT_SOURCE_DIR}/tools/check_engine_isolation.py"
               --manifest "${KRN_ISOLATION_MANIFEST}")
     set_tests_properties(krn_engine_isolation PROPERTIES TIMEOUT 120)
+
+    # Check F (ENC-1491): the same invariant read off the BUILT artifacts with
+    # nm, so a registry hole in the graph walk above cannot hide a symbol the
+    # linker actually put in. Exit 2 if nm or an artifact is unavailable.
+    add_test(NAME krn_engine_isolation_artifact
+      COMMAND "${Python3_EXECUTABLE}"
+              "${PROJECT_SOURCE_DIR}/tools/check_engine_isolation.py"
+              --artifacts --manifest "${KRN_ISOLATION_MANIFEST}")
+    set_tests_properties(krn_engine_isolation_artifact PROPERTIES TIMEOUT 120)
 
     # The gate's own gate. A predicate that stopped detecting its violation
     # would turn krn_engine_isolation into a green no-op; this runs each one
