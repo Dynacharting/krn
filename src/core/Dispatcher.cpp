@@ -43,11 +43,19 @@ void Dispatcher::registerListener(const std::string& symbol,
                                         std::shared_ptr<INode> listener)
 {
   std::unique_lock<std::shared_mutex> lock(_listenerMutex);
-  auto& slot = _listeners[symbol];
-  auto next = slot ? std::make_shared<FieldListeners>(*slot)
-                   : std::make_shared<FieldListeners>();
+  // Build the new map BEFORE touching `_listeners`, so a throw (bad_alloc)
+  // leaves it exactly as it was — never a null slot that subscriptionCount or
+  // unregisterListener would dereference.
+  auto it = _listeners.find(symbol);
+  auto next = it != _listeners.end()
+                  ? std::make_shared<FieldListeners>(*it->second)
+                  : std::make_shared<FieldListeners>();
   (*next)[field].emplace_back(std::move(listener));
-  slot = std::move(next);
+  if (it != _listeners.end()) {
+    it->second = std::move(next);
+  } else {
+    _listeners.emplace(symbol, std::move(next));
+  }
 }
 
 std::size_t Dispatcher::subscriptionCount() const {
