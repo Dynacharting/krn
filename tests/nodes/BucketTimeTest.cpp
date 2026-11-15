@@ -235,6 +235,13 @@ TEST(BucketTimeTest, TwoBucketTimesShareBoundary) {
     checkNode("bt1", s1, a1);
     checkNode("bt2", s2, a2);
 
+    { // DIAG ENC-1639
+      int gaps1=0,gaps2=0,only2=0;
+      for(size_t i=1;i<s1.size();++i) if(s1[i]-s1[i-1]!=period_ms) ++gaps1;
+      for(size_t i=1;i<s2.size();++i) if(s2[i]-s2[i-1]!=period_ms) ++gaps2;
+      for(auto b:s2) if(std::find(s1.begin(),s1.end(),b)==s1.end()) ++only2;
+      if(gaps1||gaps2||only2) fprintf(stderr,"DIAG gaps1=%d gaps2=%d only2=%d last1=%lld last2=%lld\n",gaps1,gaps2,only2,(long long)s1.back(),(long long)s2.back());
+    }
     size_t shared = 0;
     for (const auto b : s2)
         if (std::find(s1.begin(), s1.end(), b) != s1.end()) ++shared;
