@@ -207,16 +207,17 @@ using Keys = std::vector<std::pair<std::string, std::string>>;
 
 // One engine: pool, store, Dispatcher, and the graph.
 struct Rig {
-  explicit Rig(bool elide, std::size_t capFields = 0)
+  explicit Rig(bool elide, std::size_t capFields = 0, int dispatcherFieldCap = 0)
     : pool(std::make_shared<rt::ThreadPool>(kPoolThreads)),
-      disp(pool.get(), &store, config(elide)) {
+      disp(pool.get(), &store, config(elide, dispatcherFieldCap)) {
     if (capFields) store.setCaps(0, capFields);
     sid = symbols.intern(kSym);
     disp.setSymbolTable(&symbols);
   }
-  static util::Config config(bool elide) {
+  static util::Config config(bool elide, int dispatcherFieldCap) {
     util::Config c;
     c.storeWriteElision = elide;
+    if (dispatcherFieldCap > 0) c.maxFieldsPerSymbol = dispatcherFieldCap;
     return c;
   }
   ~Rig() {
@@ -290,8 +291,9 @@ struct Outcome {
   std::size_t              declaredPresent = 0;  // declared keys holding a value at the end
 };
 
-Outcome drive(bool elide, Ingress how, const std::vector<Tick>& in) {
-  Rig rig(elide);
+Outcome drive(bool elide, Ingress how, const std::vector<Tick>& in,
+              int dispatcherFieldCap = 0) {
+  Rig rig(elide, 0, dispatcherFieldCap);
   rig.buildGraph();
   Outcome r;
   r.readKeys = rig.store.readKeys();
@@ -533,6 +535,21 @@ TEST(StoreWriteElision, UnderAStoreCapElisionNeverLosesADeclaredKey) {
   }
   EXPECT_LT(offDeclared, onDeclared);
   EXPECT_EQ(onDeclared, kDeclaredKeys);
+}
+
+// The Dispatcher's OWN raw-admission budget (`maxFieldsPerSymbol`) must
+// decide exactly as it does off: an elided field still takes its slot, so a
+// declared field behind it is refused in both modes, not admitted only on.
+// With a budget of 1 the ledger admits `ask` (unread) and refuses `bid`.
+TEST(StoreWriteElision, TheDispatcherAdmissionBudgetDecidesAsItDoesOff) {
+  const auto in = ticks();
+  for (Ingress how : {Ingress::OnTick, Ingress::OnRecord}) {
+    const Outcome off = drive(false, how, in, 1);
+    const Outcome on  = drive(true,  how, in, 1);
+    ASSERT_TRUE(on.sealed);
+    EXPECT_EQ(diff(off, on), "");
+    EXPECT_EQ(on.store, off.storeDeclared);
+  }
 }
 
 // ---- 7 --------------------------------------------------------------------
