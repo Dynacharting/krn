@@ -476,7 +476,7 @@ std::string comboName(const Combo& c) {
 
 // Exact bytes of one run: per-request terminal streams, the inline order tap,
 // and the sorted AtomicStore.
-std::string drive(const Combo& c, std::size_t* minCount) {
+std::string drive(const Combo& c, std::vector<std::size_t>* counts) {
   util::Config cfg;
   cfg.atomicKeyNamespaceByField = c.ns;
   cfg.inlineDagDrive = c.inl;
@@ -530,12 +530,13 @@ std::string drive(const Combo& c, std::size_t* minCount) {
   pool->drain();
 
   std::string out;
-  *minCount = static_cast<std::size_t>(-1);
+  counts->clear();
   for (auto& s : sinks) {
     std::lock_guard<std::mutex> lk(s->mx);
     putStr(out, s->bytes);
-    *minCount = std::min(*minCount, s->count);
+    counts->push_back(s->count);
   }
+  counts->push_back(order.size());
   putStr(out, order);
   auto snap = store.snapshot();
   std::sort(snap.begin(), snap.end(), [](const auto& a, const auto& b) {
@@ -551,7 +552,7 @@ std::string drive(const Combo& c, std::size_t* minCount) {
   }
   pool->drain();
   pool->shutdown();
-  if (order.empty() || st.empty()) *minCount = 0;
+  counts->push_back(st.size());
   return out;
 }
 
@@ -560,16 +561,29 @@ class ListenerSnapshotParity : public ::testing::TestWithParam<int> {};
 TEST_P(ListenerSnapshotParity, DumpIsDeterministicAndNonVacuous) {
   const int b = GetParam();
   const Combo c{(b & 1) != 0, (b & 2) != 0, (b & 4) != 0, (b & 8) != 0};
-  std::size_t minCount = 0;
-  const std::string first = drive(c, &minCount);
-  ASSERT_GT(minCount, 0u) << comboName(c) << ": some terminal received nothing";
-  std::size_t again = 0;
+  std::vector<std::size_t> counts;
+  const std::string first = drive(c, &counts);
+  // Non-vacuous: the raw push, the join, the bare derived push and the Worker
+  // always deliver; `ask.stddev` exists only with namespacing on; the inline
+  // order tap and the store are never empty. (The pull fan-in reads `bid.max`,
+  // which only namespacing writes, so with it off that terminal is silent on
+  // master too — the dump records the count either way.)
+  ASSERT_EQ(counts.size(), requests().size() + 2);
+  for (std::size_t q : {0u, 1u, 2u, 5u, 6u})
+    EXPECT_GT(counts[q], 0u) << comboName(c) << ": request " << q << " silent";
+  if (c.ns) EXPECT_GT(counts[3], 0u) << comboName(c) << ": ask.stddev silent";
+  else      EXPECT_EQ(counts[3], 0u) << comboName(c) << ": ask.stddev without ns";
+  EXPECT_GT(counts[7], 0u) << "order tap empty";
+  EXPECT_GT(counts[8], 0u) << "store empty";
+  std::vector<std::size_t> again;
   EXPECT_EQ(drive(c, &again), first) << comboName(c) << ": not deterministic";
+  std::string cs;
+  for (auto n : counts) cs += " " + std::to_string(n);
 
   std::uint64_t h = 1469598103934665603ull;  // FNV-1a 64
   for (unsigned char ch : first) { h ^= ch; h *= 1099511628211ull; }
-  std::printf("ENC-1634 dump %s bytes=%zu fnv=%016llx\n", comboName(c).c_str(),
-              first.size(), static_cast<unsigned long long>(h));
+  std::printf("ENC-1634 dump %s bytes=%zu fnv=%016llx counts=%s\n", comboName(c).c_str(),
+              first.size(), static_cast<unsigned long long>(h), cs.c_str());
   if (const char* dir = std::getenv("KRN_ENC1634_DUMP_DIR")) {
     std::ofstream f(std::string(dir) + "/" + comboName(c) + ".bin", std::ios::binary);
     f.write(first.data(), static_cast<std::streamsize>(first.size()));
