@@ -298,7 +298,7 @@ void Dispatcher::ingest(const std::string& symbol,
     c->compute(symbol, fields, ctx);
   }
 
-  // Collect, under the listener lock, each subscribed field this tick carries
+  // Walk, from one listener snapshot, each subscribed field this tick carries
   // together with ALL of its Listeners.
   //
   // ENC-1624: GROUPED BY FIELD, and the grouping is the fix. This used to be a
