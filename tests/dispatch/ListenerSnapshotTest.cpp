@@ -424,8 +424,13 @@ const std::vector<std::string>& requests() {
           {"type":"Listener","streamKey":"SNAP","field":"bid"}]}})",
       R"({"streamKey":"SNAP","field":"mean"})",
       R"({"streamKey":"SNAP","field":"ask.stddev"})",
+      // Pull fan-ins over Dispatcher builtins, one per key shape: bare keys
+      // resolve with namespacing off, `<field>.<fn>` keys with it on.
       R"({"streamKey":"SNAP","field":"ask","node":{"type":"Aggregate","arity":2,"inputs":[
           {"type":"AtomicAccessor","streamKey":"SNAP","field":"mean"},
+          {"type":"AtomicAccessor","streamKey":"SNAP","field":"max"}]}})",
+      R"({"streamKey":"SNAP","field":"ask","node":{"type":"Aggregate","arity":2,"inputs":[
+          {"type":"AtomicAccessor","streamKey":"SNAP","field":"ask.mean"},
           {"type":"AtomicAccessor","streamKey":"SNAP","field":"bid.max"}]}})",
       R"({"streamKey":"SNAP","field":"size","pipeline":[{"type":"Worker","fn":"sum"}]})",
       R"({"streamKey":"SNAP","field":"bid"})",
@@ -563,18 +568,18 @@ TEST_P(ListenerSnapshotParity, DumpIsDeterministicAndNonVacuous) {
   const Combo c{(b & 1) != 0, (b & 2) != 0, (b & 4) != 0, (b & 8) != 0};
   std::vector<std::size_t> counts;
   const std::string first = drive(c, &counts);
-  // Non-vacuous: the raw push, the join, the bare derived push and the Worker
-  // always deliver; `ask.stddev` exists only with namespacing on; the inline
-  // order tap and the store are never empty. (The pull fan-in reads `bid.max`,
-  // which only namespacing writes, so with it off that terminal is silent on
-  // master too — the dump records the count either way.)
+  // Non-vacuous: the raw push, the join, the bare derived push, the Worker
+  // and the raw `bid` push always deliver; `ask.stddev` and the namespaced
+  // pull fan-in exist only with namespacing on, the bare pull fan-in only
+  // with it off; the inline order tap and the store are never empty.
   ASSERT_EQ(counts.size(), requests().size() + 2);
-  for (std::size_t q : {0u, 1u, 2u, 5u, 6u})
+  for (std::size_t q : {0u, 1u, 2u, 6u, 7u})
     EXPECT_GT(counts[q], 0u) << comboName(c) << ": request " << q << " silent";
-  if (c.ns) EXPECT_GT(counts[3], 0u) << comboName(c) << ": ask.stddev silent";
-  else      EXPECT_EQ(counts[3], 0u) << comboName(c) << ": ask.stddev without ns";
-  EXPECT_GT(counts[7], 0u) << "order tap empty";
-  EXPECT_GT(counts[8], 0u) << "store empty";
+  for (std::size_t q : {3u, 5u})
+    EXPECT_EQ(counts[q] > 0, c.ns) << comboName(c) << ": request " << q;
+  EXPECT_EQ(counts[4] > 0, !c.ns) << comboName(c) << ": request 4";
+  EXPECT_GT(counts[8], 0u) << "order tap empty";
+  EXPECT_GT(counts[9], 0u) << "store empty";
   std::vector<std::size_t> again;
   EXPECT_EQ(drive(c, &again), first) << comboName(c) << ": not deterministic";
   std::string cs;
