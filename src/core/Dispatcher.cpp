@@ -323,6 +323,7 @@ void Dispatcher::ingest(const std::string& symbol,
   // call, which takes its own snapshot), never by the rest of this fan-out.
   const auto symListeners = listenerSnapshot(symbol);
   if (!symListeners) return;
+  std::shared_lock<std::shared_mutex> mutationM1(_listenerMutex);
 
   for (const auto& [field, nodes] : *symListeners) {
     if (nodes.empty() || !fields.has(field)) continue;
