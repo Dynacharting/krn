@@ -31,12 +31,23 @@ Dispatcher::Dispatcher(rt::ThreadPool* threadPool,
   , _maxFieldsPerSymbol(static_cast<std::size_t>(std::max(1, cfg.maxFieldsPerSymbol)))
 {}
 
+// ENC-1634 — COPY-ON-WRITE. See `_listeners` in the header. A writer never
+// mutates a published map: it copies the symbol's current one, edits the copy
+// and swaps the pointer, all under the unique lock, so a reader that took the
+// old pointer keeps iterating a map nobody will touch again. The copy here is
+// O(this symbol's subscriptions) and happens once per (un)registration — the
+// cost the per-call copy in `computeAndStoreAtomics` used to pay per field per
+// tick.
 void Dispatcher::registerListener(const std::string& symbol,
                                         const std::string& field,
                                         std::shared_ptr<INode> listener)
 {
   std::unique_lock<std::shared_mutex> lock(_listenerMutex);
-  _listeners[symbol][field].emplace_back(std::move(listener));
+  auto& slot = _listeners[symbol];
+  auto next = slot ? std::make_shared<FieldListeners>(*slot)
+                   : std::make_shared<FieldListeners>();
+  (*next)[field].emplace_back(std::move(listener));
+  slot = std::move(next);
 }
 
 std::size_t Dispatcher::subscriptionCount() const {
@@ -44,7 +55,7 @@ std::size_t Dispatcher::subscriptionCount() const {
   std::size_t n = 0;
   for (const auto& [symbol, byField] : _listeners) {
     (void)symbol;
-    for (const auto& [field, subs] : byField) { (void)field; n += subs.size(); }
+    for (const auto& [field, subs] : *byField) { (void)field; n += subs.size(); }
   }
   return n;
 }
@@ -56,26 +67,42 @@ void Dispatcher::unregisterListener(const std::string& symbol,
   std::unique_lock<std::shared_mutex> lock(_listenerMutex);
   auto symIt = _listeners.find(symbol);
   if (symIt == _listeners.end()) return;
-  auto& fieldMap = symIt->second;
-  auto fldIt = fieldMap.find(field);
-  if (fldIt == fieldMap.end()) return;
-  auto& vec = fldIt->second;
-  vec.erase(std::remove(vec.begin(), vec.end(), listener), vec.end());
-  if (vec.empty()) fieldMap.erase(fldIt);
-  if (fieldMap.empty()) _listeners.erase(symIt);
+  const FieldListeners& current = *symIt->second;
+  auto fldIt = current.find(field);
+  if (fldIt == current.end()) return;
+  const auto& vec = fldIt->second;
+  // Not registered on this field: nothing changes, so publish nothing.
+  if (std::find(vec.begin(), vec.end(), listener) == vec.end()) return;
+
+  auto next = std::make_shared<FieldListeners>(current);
+  auto& nvec = (*next)[field];
+  nvec.erase(std::remove(nvec.begin(), nvec.end(), listener), nvec.end());
+  if (nvec.empty()) next->erase(field);
+  if (next->empty()) {
+    _listeners.erase(symIt);
+  } else {
+    symIt->second = std::move(next);
+  }
+}
+
+std::shared_ptr<const Dispatcher::FieldListeners>
+Dispatcher::listenerSnapshot(const std::string& symbol) const {
+  std::shared_lock<std::shared_mutex> lock(_listenerMutex);
+  auto sit = _listeners.find(symbol);
+  if (sit == _listeners.end()) return nullptr;
+  return sit->second;
 }
 
 // ENC-1338. See the header: a diagnostic snapshot, never a synchronisation
-// point. Takes the same shared lock and makes the same copy `notifyListeners`
-// does.
+// point. Returns a copy of the field's vector out of the symbol's snapshot,
+// exactly what it returned when it copied it under the lock.
 std::vector<std::shared_ptr<INode>>
 Dispatcher::listenersFor(const std::string& symbol,
                          const std::string& field) const {
-  std::shared_lock<std::shared_mutex> lock(_listenerMutex);
-  auto sit = _listeners.find(symbol);
-  if (sit == _listeners.end()) return {};
-  auto fit = sit->second.find(field);
-  if (fit == sit->second.end()) return {};
+  const auto snap = listenerSnapshot(symbol);
+  if (!snap) return {};
+  auto fit = snap->find(field);
+  if (fit == snap->end()) return {};
   return fit->second;
 }
 
@@ -271,7 +298,7 @@ void Dispatcher::ingest(const std::string& symbol,
     c->compute(symbol, fields, ctx);
   }
 
-  // Collect, under the listener lock, each subscribed field this tick carries
+  // Walk, from one listener snapshot, each subscribed field this tick carries
   // together with ALL of its Listeners.
   //
   // ENC-1624: GROUPED BY FIELD, and the grouping is the fix. This used to be a
@@ -287,20 +314,18 @@ void Dispatcher::ingest(const std::string& symbol,
   // within a field its Listeners in registration order — the same sequence the
   // flat pair list produced. What disappears is the repeated derived delivery
   // that used to sit between a field's second and later Listeners.
-  std::vector<std::pair<std::string, std::vector<std::shared_ptr<INode>>>>
-      toNotify;
-  {
-    std::shared_lock<std::shared_mutex> lock(_listenerMutex);
-    auto lit = _listeners.find(symbol);
-    if (lit != _listeners.end()) {
-      for (auto& kv : lit->second) {
-        if (kv.second.empty() || !fields.has(kv.first)) continue;
-        toNotify.emplace_back(kv.first, kv.second);
-      }
-    }
-  }
+  //
+  // ENC-1634: the per-tick collection is now the symbol's copy-on-write
+  // snapshot itself — one `shared_ptr` taken under the shared lock, walked
+  // with no lock held. It is the same set the copy held: taken once, before
+  // any delivery, so a Listener that (un)registers from inside `onValue` is
+  // seen from the next tick on (and by the next `computeAndStoreAtomics`
+  // call, which takes its own snapshot), never by the rest of this fan-out.
+  const auto symListeners = listenerSnapshot(symbol);
+  if (!symListeners) return;
 
-  for (auto& [field, nodes] : toNotify) {
+  for (const auto& [field, nodes] : *symListeners) {
+    if (nodes.empty() || !fields.has(field)) continue;
     double raw = 0.0;
     if (!fields.tryGetNumber(field, raw)) continue;
 
@@ -377,15 +402,13 @@ void Dispatcher::deliver(const std::shared_ptr<INode>& node,
 void Dispatcher::notifyListeners(const std::string& symbol,
                                        const std::string& field,
                                        double value) {
-  std::vector<std::shared_ptr<INode>> targets;
-  {
-    std::shared_lock<std::shared_mutex> lock(_listenerMutex);
-    auto sit = _listeners.find(symbol);
-    if (sit == _listeners.end()) return;
-    auto fit = sit->second.find(field);
-    if (fit == sit->second.end()) return;
-    targets = fit->second;
-  }
+  // ENC-1634: deliver straight out of the snapshot; it is immutable, and
+  // holding it keeps every target alive exactly as the copied vector did.
+  const auto snap = listenerSnapshot(symbol);
+  if (!snap) return;
+  auto fit = snap->find(field);
+  if (fit == snap->end()) return;
+  const auto& targets = fit->second;
   if (targets.empty()) return;
 
   StreamValue out{ symbol, value };
@@ -413,17 +436,15 @@ void Dispatcher::computeAndStoreAtomics(const std::string& symbol,
 
   // Snapshot this symbol's subscribers once. If nothing is subscribed there is
   // no listener to notify and no atomic worth materialising, so bail before
-  // touching FunctionMap at all (ENC-792/M10). The copy is bounded by this
-  // symbol's subscriptions and is required because we must not hold
+  // touching FunctionMap at all (ENC-792/M10). We must not hold
   // _listenerMutex while invoking onValue()/post() below (re-entrant
-  // (un)registerListener would deadlock on the unique_lock).
-  std::map<std::string, std::vector<std::shared_ptr<INode>>> symListeners;
-  {
-    std::shared_lock<std::shared_mutex> lock(_listenerMutex);
-    auto sit = _listeners.find(symbol);
-    if (sit == _listeners.end()) return;
-    symListeners = sit->second;
-  }
+  // (un)registerListener would deadlock on the unique_lock). Until ENC-1634
+  // that was bought by deep-copying the symbol's whole map here, on every
+  // call; it is now the copy-on-write snapshot — one shared_ptr under the
+  // shared lock — and the walk below is lock-free over an immutable map.
+  const auto snap = listenerSnapshot(symbol);
+  if (!snap) return;
+  const FieldListeners& symListeners = *snap;
   if (symListeners.empty()) return;
 
   // Compute ONLY the builtins that have a subscriber for this symbol. The old
