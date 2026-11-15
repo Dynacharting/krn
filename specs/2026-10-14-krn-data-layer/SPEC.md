@@ -118,6 +118,20 @@ the ingest job and `IL1Store::isComplete` makes a query over an incomplete windo
 rather than answer short. Row counts cannot substitute: a quiet window and a missing window
 have the same count. §8.8.
 
+*D11 mechanism, as shipped by T2 (ENC-1480):* `gma.ingest_windows` (the DB is `krn` in
+krn-data since ENC-1485, so `krn.ingest_windows`) is a plain-`MergeTree`, unpartitioned
+**append-only transition log**: one row per state change of one window, never an update in
+place, ordered by `(symbol, kind, from_ts, to_ts, updated_at)`. `updated_at` is a **write**
+clock, `DateTime64(3)` with `DEFAULT now64(3)`, and `session_id` is deliberately not in the
+key. A window counts only when its **newest row by `updated_at` is `state = 1`**, and the
+request must be covered by the union of such windows; no row at all means not ingested, and
+the query fails. The read rule, its tie rule (lowest state wins) and the one admissible count
+(a count can refute a `state = 1` claim, never establish one) are krn-data
+`docs/data-layer.md` §8.8. Today the rule is implemented once, as `krn::data::isComplete`,
+called only by `krn_ingest verify`. `IL1Store::isComplete` is still a pure virtual with no
+defined override, because the planner is not built. Why the engine is not
+`ReplacingMergeTree(completed_at)`: §5, settled by measurement.
+
 **D12 — trades + MBO puts every execution in the store twice; the planner refuses both.**
 An execution is a `trades` row *and* MBO trade/fill records — two views, not duplicates, but
 a graph reading both double-counts volume. `ObTradeEvent::bookNeutral` is the existing
@@ -261,6 +275,21 @@ below); whether `ob::Provider` consults `isStale` before serving `ob.*` (post-me
   `DatabentoAdapter::Config::fillReducesRestingOrder`, with both branches tested. **T5
   (ENC-1483) must settle this against real MBO before the first ingest** — it is a wrong
   *answer*, not a cosmetic bug.
+- ~~**Can `gma.ingest_windows` be `ReplacingMergeTree(completed_at)`, as revision 2 had it,
+  with `FINAL` or `argMax` on the read path as the mitigation?**~~ **SETTLED by T2
+  (ENC-1480), measured on ClickHouse 25.3.14.14: NO.** `completed_at` is a *completion*
+  clock, so the in-flight row a re-ingest writes carries `0`. After `(state=1,
+  completed_at=T)` then `(state=0, completed_at=0)`, `SELECT state … FINAL` and
+  `argMax(state, completed_at)` both return the stale `1`, and after `OPTIMIZE TABLE … FINAL`
+  only `(1, T)` survives: the engine deletes the row that says "not loaded". The window then
+  reads complete permanently and silently, which is D11's failure. The read-path mitigation
+  does not mitigate it. Reproduced independently on the same server. The finding is scoped
+  to that version; the shipped design does not depend on it, because nothing in the
+  replacement dedups. What shipped is D11's mechanism note above. The reversal is a gate:
+  krn-data `data/schema/check_no_compute.py` rejects `ingest_windows` with any engine but
+  plain `MergeTree`, and its self-test carries the `ReplacingMergeTree(completed_at)` mutant.
+  `gma.symbology` stays the one `ReplacingMergeTree`, with `ingested_at` as a genuine write
+  clock.
 
 **Facts T5 (ENC-1483) settled by measurement, against the real Databento sample Nick
 pulled** — `XNAS.ITCH`, `MSFT`, `mbo` + `trades`, requested `2022-06-10 12:30:00–14:00:00
