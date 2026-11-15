@@ -27,7 +27,7 @@ so what the invariant protects is the first one, plus the general property that
 krn_engine builds whether or not the data layer is in the build.  "The client
 profile omits krn_data" is true of one variant and not of D14.)
 
-FOUR CHECKS, each closing a different route in:
+THE CHECKS, each closing a different route in:
 
   A  textual   no engine translation unit includes an Arrow / Parquet /
                ClickHouse / DuckDB header, nor a header that exists only under
@@ -53,6 +53,15 @@ FOUR CHECKS, each closing a different route in:
                comments and literal bodies blanked, is market vocabulary
                derived from git history (tools/derive_market_vocabulary.py).
                Its control is a committed fixture, scanned every run.
+
+  F  artifact  (ENC-1491; `--artifacts`, ctest krn_engine_isolation_artifact)
+               `nm -C` over the BUILT libkrn_engine.a, libkrn_host.a and
+               krn_engine_server finds no Arrow/Parquet/Gandiva/ClickHouse/
+               DuckDB symbol (rules derived from FORBIDDEN_INCLUDE_PREFIXES),
+               no krn_data symbol and no market symbol (check E's vocabulary).
+               A-E read the source and the graph; F asks the linker.  Its
+               control is krn_isolation_nm_control, a compiled fixture.  See
+               the block above ARTIFACT_ROOTS.
 
 CHECK B IS THE WEAKEST OF THE FOUR, AND ITS HOLE IS DELIBERATE.  (ENC-1497)
 Its rule used to be "any in-repo include dir that is not `<root>/include`",
@@ -708,15 +717,18 @@ def control_reachers(graph: dict[str, list[str]]) -> list[str]:
     reach cannot quietly pick it up either.
     """
     problems: list[str] = []
+    controls = (CONTROL_TARGET, CONTROL_PROBE, NM_CONTROL_TARGET)
     for target in sorted(graph):
-        if target == CONTROL_TARGET:
+        if target in (CONTROL_TARGET, NM_CONTROL_TARGET):
             continue
         for _name, cands, chain in link_closure(graph, target):
-            if CONTROL_TARGET in cands or CONTROL_PROBE in cands:
+            hit = next((c for c in controls if c in cands), None)
+            if hit is not None:
                 problems.append(
-                    f"{target} links the isolation control via "
-                    f"{' -> '.join(chain)} -- {CONTROL_TARGET} exists only to be "
-                    f"scanned and must never be linked into a real target")
+                    f"{target} links the isolation control '{hit}' via "
+                    f"{' -> '.join(chain)} -- {CONTROL_TARGET} and "
+                    f"{NM_CONTROL_TARGET} exist only to be scanned and must "
+                    f"never be linked into a real target")
                 break
     return problems
 
@@ -1621,7 +1633,516 @@ def selftest_gate(failures: list[str]) -> int:
              mutant("control-in-unreached-target",
                     lambda g: g.update({"krn_other": [CONTROL_TARGET]})),
              1)
+        # Check F's control (ENC-1491) is scanned, never linked, the same way.
+        with_nm_ctl = dict(base_graph, **{NM_CONTROL_TARGET: []})
+        gate("nm-control-row-is-legal", with_nm_ctl, 0)
+        gate("nm-control-in-krn_host",
+             mutant("nm-control-in-krn_host", lambda g: g.update(
+                 {NM_CONTROL_TARGET: [],
+                  "krn_host": ["krn_engine", NM_CONTROL_TARGET]})), 1)
     return len(ran)
+
+
+# --- check F: the built artifact, read with nm (ENC-1491) -----------------
+# Checks A-E read source text and the CMake link graph.  A graph walk is only
+# as complete as its registry, and ENC-1481's history is two registries with a
+# hole one level below where it was looked for.  Check F asks the linker
+# instead: it runs `nm -C` over the archives and the executable this build
+# produced and fails on a forbidden symbol, defined or undefined (an undefined
+# arrow:: reference is the dependency just as surely as a defined one).  It
+# corroborates checks C and D from the other direction; it does not replace
+# them, because they name the offending CHAIN and this names only a symbol.
+#
+# WHAT IT FORBIDS, re-derived for the repo after the extraction (no data/, no
+# Arrow).  Each rule comes from vocabulary this file already owns, so there
+# is no second list to drift:
+#
+#   third-party  one rule per FORBIDDEN_INCLUDE_PREFIXES entry: `arrow/` is
+#                the namespace `arrow::`, `arrow_` a C-API symbol prefix,
+#                `duckdb` both `duckdb::` and `duckdb_`.  The namespace must be
+#                at the top level, so `krn::arrowlike::` and `myarrow::` pass.
+#   krn_data     a `krn::data::X` whose X is not declared inside a
+#                `namespace krn::data` / `namespace data` block of the engine's
+#                own include/ tree.  Not the bare namespace: SymbolTable is
+#                engine code in krn::data on purpose (ENC-1486), so the
+#                allowlist is read off include/ at run time, never typed in.
+#   market       the connector namespace `krn::market::`, and any component of
+#                a `krn::`-anchored qualified name that is check E's derived
+#                vocabulary (ENC-1579), less its exemptions.  Anchored on
+#                `krn::` because third-party code says `Level` too:
+#                rapidjson's Writer::Level is in libkrn_engine.a.
+#
+# ARTIFACTS are krn_engine, krn_host and krn_engine_server, read from the
+# manifest's `artifact.<target>` rows (`$<TARGET_FILE:...>`).
+#
+# POSITIVE CONTROL: krn_isolation_nm_control, built from
+# tools/fixtures/nm_control_probe.cpp with krn_engine's IPO setting, so it is
+# the same object format.  Its probes must trip EVERY rule and its decoys
+# none.  Scanned, never linked, like krn_isolation_control.
+#
+# COULD NOT RUN (exit 2, never a pass): no nm, nm exits non-zero or says it
+# needs a plugin, an artifact is missing, an artifact shows fewer than
+# MIN_ARTIFACT_KRN_SYMBOLS defined krn:: symbols (a slim-LTO archive read by a
+# nm without the plugin lists none, and would otherwise read as clean), or the
+# control is silent on any rule or trips on a decoy.
+ARTIFACT_ROOTS = ("krn_engine", "krn_host", "krn_engine_server")
+NM_CONTROL_TARGET = "krn_isolation_nm_control"
+NM_CONTROL_SOURCE = os.path.join("tools", "fixtures", "nm_control_probe.cpp")
+NM_PROBE = "krn_isolation_nm_probe"
+NM_DECOY = "krn_isolation_nm_probe_decoy"
+# Measured 2026-11-15, Release + LTO, gcc-nm: 727 defined krn:: symbols in
+# libkrn_engine.a, 58 in libkrn_host.a, 400 in krn_engine_server.  20 is well
+# under the smallest and well over the zero of an archive nm cannot read
+# (`nm --plugin /nonexistent` on a slim-LTO object lists nothing).  A plain
+# nm reads these archives here only because binutils autoloads the plugin
+# from bfd-plugins/; that is why CMake prefers gcc-nm / llvm-nm.
+MIN_ARTIFACT_KRN_SYMBOLS = 20
+NM_LINE_RE = re.compile(r"^\s*([0-9a-fA-F]*)\s+([A-Za-z?-])\s(.+)$")
+KRN_QUALIFIED_RE = re.compile(r"(?<![\w:])krn::((?:\w+::)*)(\w+)")
+KRN_DATA_RE = re.compile(r"(?<![\w:])krn::data::(\w+)")
+MARKET_NS_RE = re.compile(r"(?<![\w:])krn::market::")
+_LEAD_IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def third_party_symbol_rules(prefixes=FORBIDDEN_INCLUDE_PREFIXES
+                             ) -> list[tuple[str, re.Pattern]]:
+    """(label, pattern) derived from the forbidden include prefixes."""
+    rules: list[tuple[str, re.Pattern]] = []
+    seen: set[str] = set()
+    for p in prefixes:
+        m = _LEAD_IDENT_RE.match(p)
+        if not m:
+            raise ValueError(f"include prefix {p!r} has no leading identifier")
+        ident, rest = m.group(0), p[m.end():]
+        if rest == "" and ident.endswith("_"):
+            forms = [("c", ident)]                     # arrow_
+        elif rest == "":
+            forms = [("ns", ident), ("c", ident + "_")]  # duckdb
+        else:
+            forms = [("ns", ident)]                    # arrow/, clickhouse-cpp/
+        for kind, word in forms:
+            label = f"{word}::" if kind == "ns" else f"{word}*"
+            if label in seen:
+                continue
+            seen.add(label)
+            pat = (re.compile(rf"(?<![\w:]){re.escape(word)}::") if kind == "ns"
+                   else re.compile(rf"^{re.escape(word)}"))
+            rules.append((label, pat))
+    return rules
+
+
+def engine_data_names(root: str) -> set[str]:
+    """Names the engine's include/ declares inside krn::data.  The allowlist."""
+    names: set[str] = set()
+    for path in walk_tree(root, "include"):
+        try:
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                text = strip_cpp(fh.read())
+        except OSError:
+            continue
+        for m in re.finditer(r"\bnamespace\s+(?:krn::data|data)\s*\{", text):
+            depth, i = 1, m.end()
+            while i < len(text) and depth:
+                depth += {"{": 1, "}": -1}.get(text[i], 0)
+                i += 1
+            body = text[m.end():i]
+            names |= set(re.findall(
+                r"\b(?:class|struct|union|enum(?:\s+class|\s+struct)?)\s+(\w+)",
+                body))
+            names |= set(re.findall(r"\busing\s+(\w+)\s*=", body))
+            names |= set(re.findall(r"\bnamespace\s+(\w+)", body))
+    return names
+
+
+def symbol_rules(root: str) -> list[tuple[str, object]]:
+    """Every check F rule as (label, fn symbol -> list of offending strings)."""
+    rules: list[tuple[str, object]] = []
+    for label, pat in third_party_symbol_rules():
+        rules.append((label, lambda s, pat=pat:
+                      [m.group(0) for m in pat.finditer(s)]))
+    allowed = engine_data_names(root)
+    rules.append(("krn_data", lambda s: [
+        m.group(0) for m in KRN_DATA_RE.finditer(s)
+        if m.group(1) not in allowed]))
+    rules.append(("krn::market::", lambda s:
+                  [m.group(0) for m in MARKET_NS_RE.finditer(s)]))
+    try:
+        vocab = read_vocabulary(os.path.join(root, VOCAB_FILE))
+    except OSError:
+        vocab = {}
+    match = vocab_matcher({w: t for w, t in vocab.items()
+                           if w not in VOCAB_EXEMPT})
+
+    def market_words(s: str) -> list[str]:
+        out = []
+        for m in KRN_QUALIFIED_RE.finditer(s):
+            for comp in m.group(1).split("::")[:-1] + [m.group(2)]:
+                word = match(comp)
+                if word is not None:
+                    out.append(f"{m.group(0)} ({word})")
+        return out
+    rules.append(("market vocabulary", market_words))
+    return rules
+
+
+def parse_nm(text: str) -> list[tuple[str, str]]:
+    """(type letter, demangled name) per symbol line of `nm -C` output."""
+    out = []
+    for line in text.splitlines():
+        m = NM_LINE_RE.match(line)
+        if m:
+            out.append((m.group(2), m.group(3).strip()))
+    return out
+
+
+def run_nm(nm: str, path: str) -> tuple[list[tuple[str, str]] | None, str]:
+    """(symbols, '') or (None, why it could not be read)."""
+    import subprocess
+    if not path or not os.path.isfile(path):
+        return None, f"artifact {path!r} does not exist -- build it first"
+    try:
+        res = subprocess.run([nm, "-C", path], capture_output=True, text=True,
+                             check=False)
+    except OSError as exc:
+        return None, f"cannot run nm {nm!r}: {exc}"
+    if res.returncode != 0:
+        return None, (f"nm {nm!r} exited {res.returncode} on {path}: "
+                      f"{res.stderr.strip()[:300]}")
+    if "plugin needed" in res.stderr:
+        return None, (f"nm {nm!r} cannot read the LTO objects in {path} "
+                      f"(\"plugin needed\") -- use gcc-nm or llvm-nm")
+    return parse_nm(res.stdout), ""
+
+
+def scan_symbols(symbols: list[tuple[str, str]], rules
+                 ) -> dict[str, list[str]]:
+    """rule label -> offending symbol lines."""
+    hits: dict[str, list[str]] = {label: [] for label, _ in rules}
+    for kind, name in symbols:
+        for label, fn in rules:
+            found = fn(name)
+            if found:
+                hits[label].append(f"{kind} {name}  [{', '.join(found)}]")
+    return hits
+
+
+def defined_krn_symbols(symbols: list[tuple[str, str]]) -> int:
+    return sum(1 for kind, name in symbols
+               if kind not in ("U", "w", "v") and name.startswith("krn::"))
+
+
+def evaluate_artifacts(manifest: dict[str, str], nm: str | None = None
+                       ) -> tuple[list[str], list[str], list[str]]:
+    """(vacuous, problems, summary) for check F.  Pure apart from running nm."""
+    import shutil
+    summary = ["krn_engine artifact isolation (ENC-1491, check F, SPEC D14)"]
+    vacuous: list[str] = []
+    problems: list[str] = []
+    root = manifest.get("root", "")
+    if not root or not os.path.isdir(root):
+        return ([f"manifest 'root' is missing or not a directory: {root!r}"],
+                [], summary)
+    nm = nm or manifest.get("nm", "")
+    resolved = (shutil.which(nm) if nm and os.sep not in nm
+                else (nm if nm and os.access(nm, os.X_OK) else None))
+    summary.append(f"  nm              : {nm or '(none)'} -> "
+                   f"{resolved or 'NOT FOUND'}")
+    if not resolved:
+        return ([f"no usable nm ({nm or 'the manifest has no nm= row'}) -- "
+                 f"THE SPEC D14 INVARIANT WAS NOT CHECKED AGAINST THE BUILT "
+                 f"ARTIFACTS: nothing has read krn_engine, krn_host or "
+                 f"krn_engine_server for Arrow, ClickHouse-client, krn_data or "
+                 f"market symbols"], [], summary)
+    rules = symbol_rules(root)
+    labels = [label for label, _ in rules]
+    summary.append(f"  rules           : {labels}")
+    summary.append(f"  krn::data allow : {sorted(engine_data_names(root))} "
+                   f"(declared in include/)")
+
+    # The control first: a rule it cannot trip is a rule nobody has seen work.
+    ctl_path = manifest.get("nm_control", "")
+    ctl, why = run_nm(resolved, ctl_path)
+    if ctl is None:
+        vacuous.append(f"check F's positive control {NM_CONTROL_TARGET} "
+                       f"could not be read: {why}")
+        summary.append(f"  positive control: MISSING ({why})")
+    else:
+        probes = [s for s in ctl if NM_PROBE in s[1] and NM_DECOY not in s[1]]
+        decoys = [s for s in ctl if NM_DECOY in s[1]]
+        p_hits = scan_symbols(probes, rules)
+        d_hits = scan_symbols(decoys, rules)
+        silent = [label for label in labels if not p_hits[label]]
+        dead = [n for k, n in probes if not any(fn(n) for _, fn in rules)]
+        leaks = [h for label in labels for h in d_hits[label]]
+        bad = []
+        if not probes or not decoys:
+            bad.append(f"{len(probes)} probe(s), {len(decoys)} decoy(s) -- "
+                       f"the control was not built from {NM_CONTROL_SOURCE}")
+        if silent:
+            bad.append(f"no probe tripped rule(s) {silent}")
+        if dead:
+            bad.append(f"probe(s) tripping no rule: {dead}")
+        if leaks:
+            bad.append(f"decoy(s) tripped a rule: {leaks}")
+        if bad:
+            vacuous.append(f"check F's positive control {NM_CONTROL_TARGET} "
+                           f"failed: {'; '.join(bad)}")
+            summary.append(f"  positive control: FAILED ({'; '.join(bad)})")
+        else:
+            summary.append(
+                f"  positive control: ok ({NM_CONTROL_TARGET}: {len(probes)} "
+                f"probes trip all {len(labels)} rules "
+                f"{ {label: len(p_hits[label]) for label in labels} }, "
+                f"{len(decoys)} decoys trip none)")
+
+    for target in ARTIFACT_ROOTS:
+        path = manifest.get(f"artifact.{target}", "")
+        syms, why = run_nm(resolved, path)
+        if syms is None:
+            vacuous.append(f"{target}: {why}")
+            summary.append(f"  {target:<16}: COULD NOT READ ({why})")
+            continue
+        defined = defined_krn_symbols(syms)
+        hits = scan_symbols(syms, rules)
+        summary.append(
+            f"  {target:<16}: {path} -- {len(syms)} symbols, {defined} "
+            f"defined krn::, forbidden "
+            f"{ {label: len(hits[label]) for label in labels} }")
+        if defined < MIN_ARTIFACT_KRN_SYMBOLS:
+            vacuous.append(
+                f"{target}: nm shows {defined} defined krn:: symbols in {path} "
+                f"(floor {MIN_ARTIFACT_KRN_SYMBOLS}) -- nm is not reading this "
+                f"artifact's objects, so a clean result proves nothing")
+        for label in labels:
+            for h in hits[label][:5]:
+                problems.append(
+                    f"{target} ({os.path.basename(path)}) has a forbidden "
+                    f"symbol, rule {label!r}: {h} -- the built artifact carries "
+                    f"what SPEC D14's live-only variant must not")
+            if len(hits[label]) > 5:
+                problems.append(f"{target}: ... and {len(hits[label]) - 5} more "
+                                f"{label!r} symbol(s)")
+    return vacuous, problems, summary
+
+
+def run_artifact_gate(manifest_path: str, nm: str | None) -> int:
+    try:
+        manifest = read_manifest(manifest_path)
+    except OSError as exc:
+        print(f"error: cannot read manifest {manifest_path!r}: {exc}",
+              file=sys.stderr)
+        return 2
+    vacuous, problems, summary = evaluate_artifacts(manifest, nm)
+    for line in summary:
+        print(line)
+    if vacuous:
+        print("\nCOULD NOT RUN -- check F refuses to report a pass "
+              "(exit 2 unless a violation is also found):", file=sys.stderr)
+        for v in vacuous:
+            print(f"  ! {v}", file=sys.stderr)
+    if problems:
+        print(f"\nFAILED: {len(problems)} forbidden symbol(s) in the built "
+              f"artifacts:", file=sys.stderr)
+        for p in problems:
+            print(f"  ! {p}", file=sys.stderr)
+    code = exit_code(vacuous, problems)
+    if code == 0:
+        print("\nOK: nm finds no Arrow/Parquet/Gandiva/ClickHouse/DuckDB, "
+              "krn_data or market symbol in krn_engine, krn_host or "
+              "krn_engine_server, and the control trips every rule.")
+    return code
+
+
+def selftest_artifacts(failures: list[str], log: list[str]) -> int:
+    """Check F's rules on synthetic nm lines, then the whole check F gate,
+    exit code included, against fake nm executables."""
+    import stat
+    import tempfile
+
+    ran = 0
+    here = os.path.dirname(os.path.abspath(__file__))
+    root = os.path.dirname(here)
+
+    # Every forbidden include prefix yields a symbol rule.
+    tp = [label for label, _ in third_party_symbol_rules()]
+    for p in FORBIDDEN_INCLUDE_PREFIXES:
+        ident = _LEAD_IDENT_RE.match(p).group(0).rstrip("_")
+        if not any(label.startswith(ident) for label in tp):
+            failures.append(f"SELFTEST: F/prefix-{p}: no symbol rule derived")
+    if set(tp) != {"arrow::", "arrow_*", "parquet::", "gandiva::",
+                   "clickhouse::", "duckdb::", "duckdb_*"}:
+        failures.append(f"SELFTEST: F/derived-rules: {tp}")
+    log.append(f"  F/derived-rules: {tp}")
+    ran += 1
+    if "SymbolTable" not in engine_data_names(root):
+        failures.append("SELFTEST: F/krn-data-allowlist: include/ declares "
+                        "krn::data::SymbolTable but the allowlist misses it")
+    ran += 1
+
+    rules = symbol_rules(root)
+    # (name, demangled symbol, rule label it must trip or None)
+    cases = (
+        ("arrow-ns", "arrow::Status::OK()", "arrow::"),
+        ("arrow-in-template-arg", "std::shared_ptr<arrow::Table>::get() const",
+         "arrow::"),
+        ("arrow-c", "arrow_array_release", "arrow_*"),
+        ("parquet", "parquet::ParquetFileReader::Open()", "parquet::"),
+        ("gandiva", "gandiva::Projector::Make()", "gandiva::"),
+        ("clickhouse", "clickhouse::Client::Execute(clickhouse::Query const&)",
+         "clickhouse::"),
+        ("duckdb-ns", "duckdb::Connection::Query()", "duckdb::"),
+        ("duckdb-c", "duckdb_open", "duckdb_*"),
+        ("krn-data-record", "krn::data::TickRecord::size() const", "krn_data"),
+        ("krn-data-as-arg",
+         "krn::Dispatcher::onRecord(krn::data::RecordFieldSource const&)",
+         "krn_data"),
+        ("market-ns", "krn::market::registerWith()", "krn::market::"),
+        ("market-type", "krn::ob::OrderBookManager::apply()",
+         "market vocabulary"),
+        ("market-prefix", "krn::ta::sma_20()", "market vocabulary"),
+        ("clean-symboltable", "krn::data::SymbolTable::intern(std::"
+         "basic_string_view<char, std::char_traits<char> >)", None),
+        ("clean-not-top-level", "krn::arrowlike::f()", None),
+        ("clean-other-ns", "myarrow::f()", None),
+        ("clean-c-infix", "garrow_array_new", None),
+        ("clean-third-party-word", "rapidjson::Writer<rapidjson::"
+         "StringBuffer>::Level::Level()", None),
+        ("clean-exempt-word", "krn::stats::mean(std::vector<double> const&)",
+         None),
+        ("clean-engine", "krn::Dispatcher::onTick(krn::Event const&)", None),
+    )
+    for name, sym, want in cases:
+        hits = scan_symbols([("T", sym)], rules)
+        got = [label for label, v in hits.items() if v]
+        ok = got == ([want] if want else [])
+        log.append(f"  F/{name}: {got}")
+        if not ok:
+            failures.append(f"SELFTEST: F/{name}: {sym!r} tripped {got}, "
+                            f"expected {[want] if want else []}")
+        ran += 1
+    if parse_nm("0000 T a::b()\n         U c::d(int)\nx.o:\n\n") != [
+            ("T", "a::b()"), ("U", "c::d(int)")]:
+        failures.append("SELFTEST: F/parse-nm: defined and undefined lines")
+    ran += 1
+
+    # The whole gate.  An "artifact" is a text file of nm output, and the fake
+    # nm cats it, so every refusal below is the gate's and not the fixture's.
+    with tempfile.TemporaryDirectory(prefix="enc1491-nm-") as tmp:
+        fake = os.path.join(tmp, "fake-nm")
+        with open(fake, "w", encoding="utf-8") as fh:
+            fh.write('#!/bin/sh\n[ -f "$2" ] || exit 1\ncat "$2"\n')
+        os.chmod(fake, os.stat(fake).st_mode | stat.S_IEXEC)
+        failing = os.path.join(tmp, "failing-nm")
+        with open(failing, "w", encoding="utf-8") as fh:
+            fh.write("#!/bin/sh\necho 'nm: boom' >&2\nexit 3\n")
+        os.chmod(failing, os.stat(failing).st_mode | stat.S_IEXEC)
+        pluginless = os.path.join(tmp, "pluginless-nm")
+        with open(pluginless, "w", encoding="utf-8") as fh:
+            fh.write("#!/bin/sh\necho \"nm: x.o: plugin needed to handle lto "
+                     "object\" >&2\necho '00000000 T __gnu_lto_slim'\n")
+        os.chmod(pluginless, os.stat(pluginless).st_mode | stat.S_IEXEC)
+
+        legal = "".join(f"00000000 T krn::Dispatcher::f{i}()\n"
+                        for i in range(MIN_ARTIFACT_KRN_SYMBOLS + 5))
+        legal += ("         U krn::data::SymbolTable::name(unsigned int) "
+                  "const\n00000000 W rapidjson::Writer<int>::Level::Level()\n")
+        # The control's real symbols, from the committed fixture.
+        with open(os.path.join(root, NM_CONTROL_SOURCE), encoding="utf-8") as fh:
+            src = fh.read()
+        control = "".join([
+            "00000000 T arrow::krn_isolation_nm_probe()\n",
+            "00000000 T arrow_krn_isolation_nm_probe\n",
+            "00000000 T parquet::krn_isolation_nm_probe()\n",
+            "00000000 T gandiva::krn_isolation_nm_probe()\n",
+            "00000000 T clickhouse::krn_isolation_nm_probe()\n",
+            "00000000 T duckdb::krn_isolation_nm_probe()\n",
+            "00000000 T duckdb_krn_isolation_nm_probe\n",
+            "00000000 T krn::data::krn_isolation_nm_probe("
+            "krn::data::TickRecord const*)\n",
+            "00000000 T krn::market::krn_isolation_nm_probe()\n",
+            "00000000 T krn::nm_probe::krn_isolation_nm_probe("
+            "krn::nm_probe::OrderBookManager const*)\n",
+            "00000000 T krn_isolation_nm_probe_decoy("
+            "krn::data::SymbolTable const*)\n",
+            "00000000 T myarrow::krn_isolation_nm_probe_decoy()\n",
+        ])
+        if NM_PROBE not in src or NM_DECOY not in src:
+            failures.append("SELFTEST: F/control-source: the committed fixture "
+                            "names no probe or no decoy")
+
+        def write(name, text):
+            p = os.path.join(tmp, name)
+            with open(p, "w", encoding="utf-8") as fh:
+                fh.write(text)
+            return p
+
+        def manifest(arts, ctl, nm_path=fake):
+            m = {"root": root, "nm": nm_path, "nm_control": write("ctl", ctl)}
+            for t in ARTIFACT_ROOTS:
+                m[f"artifact.{t}"] = write(t, arts.get(t, legal))
+            return m
+
+        def gate(name, m, want, mention=None, nm=None):
+            vac, probs, _summary = evaluate_artifacts(m, nm)
+            got = exit_code(vac, probs)
+            log.append(f"  F/gate-{name}: exit {got}, want {want}")
+            if got != want:
+                failures.append(f"SELFTEST: F/gate-{name} exited {got}, "
+                                f"expected {want} (vacuous={vac}, "
+                                f"problems={probs})")
+            if mention and not any(mention in x for x in vac + probs):
+                failures.append(f"SELFTEST: F/gate-{name} did not say "
+                                f"{mention!r}: {vac + probs}")
+
+        def applied(name, before, after):
+            if before == after:
+                failures.append(f"SELFTEST: F/gate-{name}: mutation did not "
+                                f"apply")
+            return after
+
+        gate("legal", manifest({}, control), 0)
+        for t, line in (("krn_engine", "         U arrow::Status::OK()\n"),
+                        ("krn_host", "00000000 T krn::data::TickRecord::x()\n"),
+                        ("krn_engine_server",
+                         "00000000 T krn::market::MarketConnector::start()\n")):
+            art = applied(f"{t}-forbidden", legal, legal + line)
+            gate(f"{t}-forbidden", manifest({t: art}, control), 1, t)
+        gate("nm-missing", manifest({}, control,
+                                    os.path.join(tmp, "no-such-nm")),
+             2, "NOT CHECKED")
+        gate("nm-row-absent", {k: v for k, v in manifest({}, control).items()
+                               if k != "nm"}, 2, "NOT CHECKED")
+        gate("nm-fails", manifest({}, control, failing), 2, "exited 3")
+        gate("nm-needs-plugin", manifest({}, control, pluginless), 2,
+             "plugin needed")
+        m = manifest({}, control)
+        m["artifact.krn_host"] = os.path.join(tmp, "not-built.a")
+        gate("artifact-missing", m, 2, "does not exist")
+        slim = applied("slim-lto-archive", legal,
+                       "00000000 T __gnu_lto_slim\n")
+        gate("slim-lto-archive", manifest({"krn_engine": slim}, control), 2,
+             "floor")
+        gate("violation-outranks-vacuity",
+             manifest({"krn_engine": slim + "         U duckdb_open\n"},
+                      control), 1, "duckdb_*")
+        # The control: missing, silent on one rule, dead probe, leaking decoy.
+        m = manifest({}, control)
+        m.pop("nm_control")
+        gate("control-missing", m, 2, NM_CONTROL_TARGET)
+        no_gandiva = applied("control-silent-rule", control, "".join(
+            ln + "\n" for ln in control.splitlines() if "gandiva" not in ln))
+        gate("control-silent-rule", manifest({}, no_gandiva), 2, "gandiva::")
+        dead = applied("control-dead-probe", control,
+                       control + "00000000 T krn::reference::"
+                       "krn_isolation_nm_probe()\n")
+        gate("control-dead-probe", manifest({}, dead), 2, "tripping no rule")
+        leak = applied("control-decoy-leak", control,
+                       control + "00000000 T arrow::"
+                       "krn_isolation_nm_probe_decoy()\n")
+        gate("control-decoy-leak", manifest({}, leak), 2, "decoy")
+        gate("legal-after", manifest({}, control), 0)
+        ran += 16
+    return ran
 
 
 def selftest() -> int:
@@ -2005,6 +2526,11 @@ def selftest() -> int:
                             "krn_data"))
 
     gate_cases = selftest_gate(failures)
+    nm_log: list[str] = []
+    nm_cases = selftest_artifacts(failures, nm_log)
+    print(f"check F nm rules and gate ({nm_cases} cases):")
+    for line in nm_log:
+        print(line)
     strip_log: list[str] = []
     strip_cases = selftest_stripper(failures, strip_log)
     strip_cases += selftest_vocabulary(failures, strip_log)
@@ -2020,7 +2546,7 @@ def selftest() -> int:
         return 1
     print("selftest: all predicates detect their violation and pass legal input "
           f"({gate_cases} whole-gate exit-code cases, {strip_cases} check E "
-          f"stripper and vocabulary cases)")
+          f"stripper and vocabulary cases, {nm_cases} check F nm cases)")
     return 0
 
 
@@ -2290,6 +2816,11 @@ def main() -> int:
                          "walk)")
     ap.add_argument("--selftest", action="store_true",
                     help="verify each predicate flags a violating input")
+    ap.add_argument("--artifacts", action="store_true",
+                    help="check F: read the built artifacts named by the "
+                         "manifest's artifact.<target> rows with nm -C")
+    ap.add_argument("--nm", help="nm to use for --artifacts (default: the "
+                                 "manifest's nm= row)")
     args = ap.parse_args()
 
     if args.selftest:
@@ -2298,6 +2829,8 @@ def main() -> int:
     if not args.manifest:
         print("error: --manifest is required (or pass --selftest)", file=sys.stderr)
         return 2
+    if args.artifacts:
+        return run_artifact_gate(args.manifest, args.nm)
     return run_gate(args.manifest)
 
 
