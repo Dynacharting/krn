@@ -27,7 +27,7 @@ so what the invariant protects is the first one, plus the general property that
 krn_engine builds whether or not the data layer is in the build.  "The client
 profile omits krn_data" is true of one variant and not of D14.)
 
-FOUR CHECKS, each closing a different route in:
+THE CHECKS, each closing a different route in:
 
   A  textual   no engine translation unit includes an Arrow / Parquet /
                ClickHouse / DuckDB header, nor a header that exists only under
@@ -53,6 +53,15 @@ FOUR CHECKS, each closing a different route in:
                comments and literal bodies blanked, is market vocabulary
                derived from git history (tools/derive_market_vocabulary.py).
                Its control is a committed fixture, scanned every run.
+
+  F  artifact  (ENC-1491; `--artifacts`, ctest krn_engine_isolation_artifact)
+               `nm -C` over the BUILT libkrn_engine.a, libkrn_host.a and
+               krn_engine_server finds no Arrow/Parquet/Gandiva/ClickHouse/
+               DuckDB symbol (rules derived from FORBIDDEN_INCLUDE_PREFIXES),
+               no krn_data symbol and no market symbol (check E's vocabulary).
+               A-E read the source and the graph; F asks the linker.  Its
+               control is krn_isolation_nm_control, a compiled fixture.  See
+               the block above ARTIFACT_ROOTS.
 
 CHECK B IS THE WEAKEST OF THE FOUR, AND ITS HOLE IS DELIBERATE.  (ENC-1497)
 Its rule used to be "any in-repo include dir that is not `<root>/include`",
@@ -1681,9 +1690,12 @@ NM_CONTROL_TARGET = "krn_isolation_nm_control"
 NM_CONTROL_SOURCE = os.path.join("tools", "fixtures", "nm_control_probe.cpp")
 NM_PROBE = "krn_isolation_nm_probe"
 NM_DECOY = "krn_isolation_nm_probe_decoy"
-# Measured 2026-11-15, Release + LTO: 1,9xx defined krn:: symbols in
-# libkrn_engine.a, 1xx in libkrn_host.a, 1,xxx in krn_engine_server.  20 is
-# far under the smallest and far over the zero of an unreadable archive.
+# Measured 2026-11-15, Release + LTO, gcc-nm: 727 defined krn:: symbols in
+# libkrn_engine.a, 58 in libkrn_host.a, 400 in krn_engine_server.  20 is well
+# under the smallest and well over the zero of an archive nm cannot read
+# (`nm --plugin /nonexistent` on a slim-LTO object lists nothing).  A plain
+# nm reads these archives here only because binutils autoloads the plugin
+# from bfd-plugins/; that is why CMake prefers gcc-nm / llvm-nm.
 MIN_ARTIFACT_KRN_SYMBOLS = 20
 NM_LINE_RE = re.compile(r"^\s*([0-9a-fA-F]*)\s+([A-Za-z?-])\s(.+)$")
 KRN_QUALIFIED_RE = re.compile(r"(?<![\w:])krn::((?:\w+::)*)(\w+)")
