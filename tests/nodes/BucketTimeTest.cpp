@@ -10,7 +10,10 @@
 #include "krn/rt/ThreadPool.hpp"
 #include "krn/nodes/INode.hpp"
 #include <gtest/gtest.h>
+#include <algorithm>
 #include <atomic>
+#include <cstdint>
+#include <mutex>
 #include <chrono>
 #include <memory>
 #include <thread>
@@ -139,45 +142,106 @@ TEST(BucketTimeTest, TicksAlignToWallClockPeriod) {
 // fire on the SAME wall-clock boundaries (the property Interval cannot
 // provide). Confirms alignment is a function of the wall clock, not
 // the node's start time.
+//
+// ENC-1639: this used to compare wall-clock ARRIVAL times — for every bt2
+// tick, the nearest bt1 tick had to be within 25 ms — and it flaked under load
+// (8 reds in 200 runs at loadavg ~28, every one 49-52 ms: exactly one period).
+// That is not misalignment. Under load a timer thread can wake after the NEXT
+// boundary has already passed, and nextAlignedAfter(now) then arms the one
+// after it, so that node simply emits no tick for the bucket in between; and
+// bt1 is shut down before bt2, so bt2 can fire a final boundary bt1 never
+// reaches. Either way the nearest bt1 arrival is a whole period away while
+// both nodes are on the same grid.
+//
+// So the shared boundary is asserted from what each tick SAYS it is — the
+// `bucketStartMs` stamped from the very `target` the timer waited on — not from
+// when the tick happened to be delivered:
+//   1. every stamp from either node lies on the wall-clock period grid
+//      (an Interval-style, start-time-relative node lands 13 ms off it);
+//   2. the two nodes emitted at least one IDENTICAL bucket, so "shared" is
+//      observed rather than inferred from both being on the grid;
+//   3. no tick arrived before the boundary its stamp names — ties the stamp
+//      to the real firing time. This bound is one-sided (late is permitted),
+//      which is what makes it immune to scheduler delay.
+// The upper bound on lateness, i.e. "ticks land promptly at the boundary", is
+// TicksAlignToWallClockPeriod's job, not this test's.
 TEST(BucketTimeTest, TwoBucketTimesShareBoundary) {
+    struct StampingStub : INode {
+        std::mutex mx;
+        std::vector<std::int64_t> stamps;              // StreamValue::bucketStartMs
+        std::vector<system_clock::time_point> arrivals;
+        std::atomic<int> count{0};
+        void onValue(const StreamValue& v) override {
+            const auto now = system_clock::now();
+            std::lock_guard<std::mutex> lk(mx);
+            stamps.push_back(v.bucketStartMs);
+            arrivals.push_back(now);
+            ++count;
+        }
+        void shutdown() noexcept override {}
+    };
+
     rt::ThreadPool pool(2);
-    auto stub1 = std::make_shared<TimestampingStub>();
-    auto stub2 = std::make_shared<TimestampingStub>();
+    auto stub1 = std::make_shared<StampingStub>();
+    auto stub2 = std::make_shared<StampingStub>();
     constexpr auto period = 50ms;
+    constexpr std::int64_t period_ms = period.count();
     auto bt1 = std::make_shared<BucketTime>(period, stub1, &pool);
     bt1->start();
     std::this_thread::sleep_for(13ms); // off-period
     auto bt2 = std::make_shared<BucketTime>(period, stub2, &pool);
     bt2->start();
-    std::this_thread::sleep_for(220ms);
+
+    // Bounded poll instead of a fixed sleep: a slow box delays the test rather
+    // than leaving it with too few ticks to say anything.
+    const auto deadline = steady_clock::now() + 5s;
+    while ((stub1->count.load() < 4 || stub2->count.load() < 4) &&
+           steady_clock::now() < deadline)
+        std::this_thread::sleep_for(1ms);
     bt1->shutdown();
     bt2->shutdown();
+    pool.drain(); // every already-posted tick has landed before we read
 
-    std::vector<system_clock::time_point> ticks1, ticks2;
+    std::vector<std::int64_t> s1, s2;
+    std::vector<system_clock::time_point> a1, a2;
     {
         std::lock_guard<std::mutex> lk(stub1->mx);
-        ticks1 = stub1->ticks;
+        s1 = stub1->stamps; a1 = stub1->arrivals;
     }
     {
         std::lock_guard<std::mutex> lk(stub2->mx);
-        ticks2 = stub2->ticks;
+        s2 = stub2->stamps; a2 = stub2->arrivals;
     }
-    ASSERT_FALSE(ticks1.empty());
-    ASSERT_FALSE(ticks2.empty());
+    ASSERT_GE(s1.size(), 4u) << "bt1 barely ticked; nothing to compare";
+    ASSERT_GE(s2.size(), 4u) << "bt2 barely ticked; nothing to compare";
 
-    // For every tick from bt2, find the closest tick from bt1; they
-    // should be within scheduling jitter, NOT 13ms apart (which is what
-    // Interval would produce).
-    constexpr long jitter_ms = 25;
-    for (const auto& t2 : ticks2) {
-        long minDiff = std::numeric_limits<long>::max();
-        for (const auto& t1 : ticks1) {
-            const long d = std::abs(duration_cast<milliseconds>(t1 - t2).count());
-            if (d < minDiff) minDiff = d;
+    auto checkNode = [&](const char* name,
+                         const std::vector<std::int64_t>& s,
+                         const std::vector<system_clock::time_point>& a) {
+        for (size_t i = 0; i < s.size(); ++i) {
+            EXPECT_NE(s[i], 0) << name << " tick[" << i << "] carries no bucket identity";
+            EXPECT_EQ(s[i] % period_ms, 0)
+                << name << " tick[" << i << "] bucketStartMs=" << s[i]
+                << " is " << (s[i] % period_ms) << "ms off the " << period_ms
+                << "ms wall-clock grid — alignment broken";
+            const auto boundary_ms = s[i] + period_ms;
+            const auto arrival_ms =
+                duration_cast<milliseconds>(a[i].time_since_epoch()).count();
+            EXPECT_GE(arrival_ms, boundary_ms)
+                << name << " tick[" << i << "] arrived " << (boundary_ms - arrival_ms)
+                << "ms BEFORE the boundary its stamp names";
         }
-        EXPECT_LE(minDiff, jitter_ms)
-            << "bt2 tick is " << minDiff << "ms from nearest bt1 tick — alignment broken";
-    }
+    };
+    checkNode("bt1", s1, a1);
+    checkNode("bt2", s2, a2);
+
+    size_t shared = 0;
+    for (const auto b : s2)
+        if (std::find(s1.begin(), s1.end(), b) != s1.end()) ++shared;
+    EXPECT_GE(shared, 1u)
+        << "bt1 and bt2 never emitted the same bucket (bt1 " << s1.size()
+        << " ticks from " << s1.front() << ", bt2 " << s2.size()
+        << " ticks from " << s2.front() << ") — they are not sharing a boundary";
     pool.shutdown();
 }
 
