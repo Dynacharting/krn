@@ -260,7 +260,8 @@ memory":**
 **Still unverified, to be established by measurement rather than assertion:** whether
 `instrument_id` is stable within a dataset-day (**T5 narrowed it, did not close it** — see
 below); whether `ob::Provider` consults `isStale` before serving `ob.*` (post-measurement).
-`book_events` sort-key uniqueness is **measured** — see T5's block. And one T4 added:
+`book_events` sort-key uniqueness is **measured** — see T5's block, and at volume T6's
+bullet below. And one T4 added:
 
 - ~~**Does a DBN `Fill` arrive with a separate `Cancel`/`Modify` carrying the resting
   order's reduction?**~~ **RESOLVED by T5 (ENC-1483) against real MBO: YES — 91 of 91, so
@@ -290,6 +291,70 @@ below); whether `ob::Provider` consults `isStale` before serving `ob.*` (post-me
   with any engine but plain `MergeTree`, and its self-test carries the
   `ReplacingMergeTree(completed_at)` mutant. `gma.symbology` stays the one
   `ReplacingMergeTree`, with `ingested_at` as a genuine write clock.
+- ~~**Does appending `action, order_id` to `book_events`' sort key earn its keep in granule
+  skipping?**~~ **MEASURED by T6 (ENC-1484), scoped to NVDA, 3 days, XNAS.ITCH: NO. Keep
+  `(symbol, ts_event, provider_seq)`.** The sample is Databento job `XNAS-20261117-4NJAJ5R9RQ`,
+  schema `mbo`, days 2026-10-27, 2026-10-29 and 2026-11-05, ingested by krn-data `krn_ingest
+  ingest --dbn-job` at `32a08f5` into a private ClickHouse 25.3.14.14. `verify` is green on
+  all three `book_events` windows, at 7,010,872, 9,375,081 and 30,176,956 rows, **46,562,909
+  in all**. The vendor's start-of-day snapshot is excluded, as ENC-1640 does.
+  - **The triple is not unique, at volume as on MSFT.** 35,769,702 distinct keys over
+    46,562,909 rows leaves **10,793,207 excess rows (23.2%)**. **20,569,835 rows (44.2%) sit in
+    a colliding group**: 8,760,049 groups of two and 1,016,579 of three, with a **maximum
+    multiplicity of 3** on every day. Per day the excess is 1,514,807 (10-27, reproducing
+    ENC-1640's 1.51M), 2,265,689 (10-29) and 7,012,711 (11-05).
+  - **Every colliding group is one venue message, in one of three shapes.** None is
+    incidental:
+
+    | shape (canonical actions) | groups | what it is |
+    |---|---|---|
+    | `Delete`+`Add` (MSFT's `CA`) | 8,760,030 | an ITCH replace as cancel-old + add-new, two `order_id`s; 6,068 keep the price |
+    | `Trade`+`Trade`+`Delete`/`Update` (MSFT's `TFC`) | 829,604 + 186,975 | the print (`order_id` **0**), the fill (resting `order_id`) and the full or partial cancel (same resting `order_id`) |
+    | `Trade`+`Delete`, one `order_id` | 19 | a cross execution with no `order_id`-0 print: 8 at 2026-10-27 20:00:00.520645910 (the 16:00 ET close), 4 at the 11-05 open and 7 at its close |
+
+    Example `TFC` from 2026-10-27 at `15:00:00.311349942`, `provider_seq` 348975157: `T`
+    oid 0, `T` oid 394285227 and `D` oid 394285227, all 25 @ 217.62. Example `CA` at
+    `15:00:00.001808633`, seq 348943824: `D` oid 394265363 @ 218.97, then `A` oid 394266343
+    @ 218.96.
+  - **The 5-tuple `+ action, order_id` was unique on all 46,562,909 rows, maximum
+    multiplicity 1 on each day.** The same query reports multiplicity 3 for the triple, so
+    the instrument can see a collision. **This uniqueness rests on a vendor convention, not on
+    the schema.** Inside a `TFC` group, the only thing separating the print from the fill is
+    the print's `order_id = 0`. A provider that stamps the resting id on the print collides
+    them. Report it as a sample property, never a key guarantee, and per D5 never as grounds
+    for `ReplacingMergeTree`.
+  - **Granules: the extended key prunes nothing more on any range scan.** Method: both keys
+    on a **re-sort of the same rows**, not new data. `enc1484.be_k3` (current key) and
+    `be_k5` (extended key) are the server's own `book_events` DDL with only `ORDER BY`
+    changed, filled by `INSERT … SELECT` and merged to one part per day. `sum(cityHash64(*))`
+    is equal across all three tables. Each scan is `SELECT * … WHERE symbol = 'NVDA' AND
+    ts_event` in range, read from `EXPLAIN indexes = 1` and `system.query_log`:
+
+    | scan | key | PK granules | read_rows | result rows |
+    |---|---|---|---|---|
+    | 5 min, 11-05 14:30 (the open) | triple / 5-tuple | 85 / 85 | 696,320 / 696,320 | 693,493 |
+    | 5 min, 10-27 17:00 (midday) | triple / 5-tuple | 8 / 8 | 65,536 / 65,536 | 61,775 |
+    | 1 hour, 11-05 14:30 | triple / 5-tuple | 872 / 872 | 7,032,192 / 7,032,768 | 7,025,089 |
+    | 1 day, 11-05 | triple / 5-tuple | 3,738 / 3,742 (all) | 30,176,956 both | 30,176,956 |
+    | 5 min + `order_id = X` | triple / 5-tuple | 85 / 85 | 696,320 / 696,320 | — |
+
+    The 576-row and 4-granule differences are adaptive-granularity mark placement, not
+    pruning. The structural reason this cannot change is that `ts_event` is nanosecond and
+    near-unique per granule, so a column after it in the key can narrow nothing except an
+    exact-instant probe. That includes `order_id`: `EXPLAIN` shows `order_id` in the
+    condition and still 85 of 3,742 granules. No read pattern this layer has is an
+    exact-instant probe.
+  - **Cost of the extended key, from the same re-sort:** +14 marks over 5,779, compressed
+    591,574,438 → 593,176,667 bytes (**+0.27%**), and resident primary-key bytes 52,077 →
+    52,203. The `INSERT … SELECT` was 2.5 s / 3.2 s / 11.3 s with the triple against 3.1 s /
+    3.9 s / 11.1 s with the 5-tuple, one shot each. Timings carry the shared box's load
+    (1-minute load average 9.9–12.1 on 16 cores, other agents benchmarking), so read them as
+    "no visible difference" and nothing finer. Granules and read rows are deterministic.
+  - **Recommendation: no key change.** The extended key costs a little and buys no skipped
+    granule. The uniqueness it adds is worth nothing under D5's plain `MergeTree`, and it is
+    convention-dependent besides. krn-data's DDL stays as shipped. Its `SORT KEY` comment
+    ("Adding the two columns back is a one-line change IF T6 says they earn their keep") now
+    has its answer. Updating that comment is a krn-data ticket, not part of this one.
 
 **Facts T5 (ENC-1483) settled by measurement, against the real Databento sample Nick
 pulled** — `XNAS.ITCH`, `MSFT`, `mbo` + `trades`, requested `2022-06-10 12:30:00–14:00:00
@@ -318,9 +383,11 @@ back through ENC-1482's adapter. One mapping to canonical form exists and it is 
   the file: one DBN message group yields a trade print, a fill and a cancel, all three
   carrying one `ts_event` and one `sequence`. **D5's plain `MergeTree` is therefore
   load-bearing on real data, not defensive** — a `ReplacingMergeTree` on this key would
-  collapse 324 real rows in a way indistinguishable from a gap (C12). T6 still owns the
-  *second* half of its question: whether adding discriminating columns to the key earns its
-  insert cost.
+  collapse 324 real rows in a way indistinguishable from a gap (C12). T6 owned the *second*
+  half of its question: whether adding discriminating columns to the key earns its insert
+  cost. **T6 (ENC-1484) has since measured both halves at volume:** 23.2% excess rows over
+  46.6M NVDA rows, and no granule gained by the extended key. See the T6 bullet in the
+  unverified-facts list above.
 - **`instrument_id` is constant at 7370 across the window — and this does NOT close the
   dataset-day question. Scoped, not settled.** The delivered data is 68 seconds of `mbo` and
   22 minutes of `trades` (next bullet), nowhere near a dataset-day, and reassignment is a
