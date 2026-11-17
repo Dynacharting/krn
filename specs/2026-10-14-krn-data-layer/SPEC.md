@@ -260,7 +260,8 @@ memory":**
 **Still unverified, to be established by measurement rather than assertion:** whether
 `instrument_id` is stable within a dataset-day (**T5 narrowed it, did not close it** — see
 below); whether `ob::Provider` consults `isStale` before serving `ob.*` (post-measurement).
-`book_events` sort-key uniqueness is **measured** — see T5's block. And one T4 added:
+`book_events` sort-key uniqueness is **measured** — see T5's block, and at volume T6's
+bullet below. And one T4 added:
 
 - ~~**Does a DBN `Fill` arrive with a separate `Cancel`/`Modify` carrying the resting
   order's reduction?**~~ **RESOLVED by T5 (ENC-1483) against real MBO: YES — 91 of 91, so
